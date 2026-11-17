@@ -1,0 +1,13 @@
+# data are not redistributed (see README)
+data/raw/*
+data/processed/*
+!data/raw/README.md
+!data/processed/.gitkeep
+# generated outputs
+analysis/0[2-8]_*/
+analysis/03_*.md
+analysis/08_*.md
+analysis/code/qc/
+output/
+__pycache__/
+.DS_Store
