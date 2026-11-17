@@ -1,11 +1,9 @@
 #!/usr/bin/env python3
-"""Build Nature Medicine-style three-line DOCX tables from analysis/04_Tables/*.csv and verify them.
+"""Export three-line DOCX tables from analysis/04_Tables/*.csv.
 
-Run after 01_run_analysis.py:  python3 02_build_tables_docx.py
-The CSV is the single source: cells are read as display strings and written verbatim.
-Columns named "Group: sub" become a two-level header; other columns are vertically merged labels.
-After writing, each DOCX is re-opened and compared cell by cell with its CSV (differences must be 0).
-"""
+CSV cells are read as display strings. Columns named "Group: sub" form
+two-level headers; other headers are merged vertically. Exported tables
+are reopened and compared cell by cell with their CSV sources."""
 
 import csv
 import re
@@ -20,21 +18,21 @@ from docx.oxml.ns import qn
 from docx.shared import Pt, Twips
 
 OUT = Path(__file__).resolve().parent
-MAIN = OUT.parent / "04_Tables"  # CSV source and DOCX output live together
+MAIN = OUT.parent / "04_Tables"
 DOCX_DIR = MAIN
 
-PAGE_W, PAGE_H, MARGIN = 16838, 11906, 720  # A4 landscape, 0.5 inch margins (DXA)
+PAGE_W, PAGE_H, MARGIN = 16838, 11906, 720
 USABLE = PAGE_W - 2 * MARGIN
 FONT = "Times New Roman"
-# label-column widths (DXA); remaining width is shared equally by numeric columns
+
 LABEL_W = {"Characteristic": 4600, "Source": 1000, "Case definition": 3400, "Planning base": 2900}
-GROUP_TEXT_W = {}  # text sub-columns inside a header group
-GROUP_FIXED_W = {}  # sub-columns needing a fixed width
-UI_RE = re.compile(r"^(.+) \((.+) to (.+)\)$")  # "estimate (low to high)" -> two lines, en dash
+GROUP_TEXT_W = {}
+GROUP_FIXED_W = {}
+UI_RE = re.compile(r"^(.+) \((.+) to (.+)\)$")
 
 
 def display_key(v):
-    """Logical text after the documented display change (interval on line 2, ' to ' -> en dash)."""
+    """Normalize table text with intervals on a second line and en dashes."""
     m = UI_RE.match(v)
     return f"{m.group(1)}({m.group(2)}\u2013{m.group(3)})" if m else v
 
@@ -124,7 +122,7 @@ def column_widths(header):
     free = [j for j in range(len(header)) if j not in fixed]
     share = (USABLE - sum(fixed.values())) // len(free)
     widths = [fixed.get(j, share) for j in range(len(header))]
-    widths[free[-1]] += USABLE - sum(widths)  # absorb rounding so widths sum exactly to the page
+    widths[free[-1]] += USABLE - sum(widths)
     assert sum(widths) == USABLE
     return widths
 
@@ -169,11 +167,11 @@ def build(csv_path, title, note):
         tr_pr = row._tr.get_or_add_trPr()
         tr_pr.append(OxmlElement("w:cantSplit"))
         if i < 2:
-            tr_pr.append(OxmlElement("w:tblHeader"))  # repeat header rows on every page
+            tr_pr.append(OxmlElement("w:tblHeader"))
         for j, cell in enumerate(row.cells):
             set_width(cell, widths[j])
 
-    # header text (before merging so every cell gets its width)
+
     for j, col in enumerate(header):
         grp, sub = split(col)
         if grp is None:
@@ -181,14 +179,14 @@ def build(csv_path, title, note):
                        align=WD_ALIGN_PARAGRAPH.LEFT if j == 0 else WD_ALIGN_PARAGRAPH.CENTER)
         else:
             write_text(table.cell(1, j), sub, 8, bold=True)
-    # body
+
     for i, r in enumerate(body):
         for j, v in enumerate(r):
             text_col = (groups[j] is None and header[j] in LABEL_W) or split(header[j])[1] in GROUP_TEXT_W
             write_text(table.cell(2 + i, j), v, 7.5,
                        align=WD_ALIGN_PARAGRAPH.LEFT if text_col else WD_ALIGN_PARAGRAPH.CENTER)
 
-    # borders: thick top, thin rule under each group, rule under header, thick bottom
+
     last = len(table.rows) - 1
     for j in range(len(header)):
         set_cell_border(table.cell(0, j), top=12)
@@ -197,7 +195,7 @@ def build(csv_path, title, note):
         if groups[j] is not None:
             set_cell_border(table.cell(0, j), bottom=4)
 
-    # merges: label columns vertically, group headers horizontally
+
     for j, grp in enumerate(groups):
         if grp is None:
             table.cell(0, j).merge(table.cell(1, j))

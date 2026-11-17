@@ -1,18 +1,9 @@
 #!/usr/bin/env python3
-"""Export the processed CHARLS mental-health data into MDD+Charle/CHARLS/ (self-contained, documented copy).
+"""Export the processed CHARLS panel and documentation to output/CHARLS/.
 
-Run:    python3 03_export_charls_folder.py      (after 00_build_charls_panel.py)
-Input:  ../../data/processed/charls_panel_2011_2023.csv, charls_variable_crosswalk.csv
-Output: ../../../CHARLS/
-          01_charls_mental_health_panel_2011_2023.csv     all person-waves (18+), mental-health + covariate columns
-          02_charls_analytic_50plus_with_definitions.csv  analytic sample used in MS1 (≥50 y, CES-D complete, weighted) + D1–D7
-          03_summary_by_wave_sex.csv                       weighted prevalence of each definition by wave × sex
-          04_summary_by_wave_sex_age.csv                   same by 5-year age group
-          05_codebook.csv                                  column-level codebook of file 01/02
-          06_variable_crosswalk_by_wave.csv                raw CHARLS variable → harmonised variable, per wave
-          README.md
-          code/00_build_charls_panel.py                    copy of the build script (provenance)
-"""
+The export includes the full panel, the analytic sample aged 50 or older,
+weighted summaries by wave, sex and age, a codebook, a variable crosswalk
+and a copy of the panel-building script."""
 
 import shutil
 from pathlib import Path
@@ -21,16 +12,16 @@ import numpy as np
 import pandas as pd
 
 HERE = Path(__file__).resolve().parent
-MS = HERE.parent.parent
-OUT = MS / "output" / "CHARLS"
+REPO_ROOT = HERE.parent.parent
+OUT = REPO_ROOT / "output" / "CHARLS"
 (OUT / "code").mkdir(parents=True, exist_ok=True)
-PROC = MS / "data" / "processed"
+PROC = REPO_ROOT / "data" / "processed"
 
 P = pd.read_csv(PROC / "charls_panel_2011_2023.csv", low_memory=False)
 WLAB = {2011: "2011", 2013: "2013", 2015: "2015", 2018: "2018", 2020: "2020", 2026: "2021–2023"}
 AGES = ["50–54", "55–59", "60–64", "65–69", "70–74", "75–79", "80–84", "85+"]
 
-# ----------------------------------------------------------------------------- file 01: full panel, ordered columns
+
 cols = ["ID", "communityID", "wave", "wave_label", "iyear", "imonth", "age", "byear", "bmonth", "byear_wave", "bmonth_wave", "xrage_charls",
         "sex", "sex_wave", "weight", "weight_post", "crosssection", "died", "proxy",
         "hukou_agri", "urban_nbs",
@@ -40,7 +31,7 @@ cols = ["ID", "communityID", "wave", "wave_label", "iyear", "imonth", "age", "by
 P1 = P[cols].copy()
 P1.to_csv(OUT / "01_charls_mental_health_panel_2011_2023.csv", index=False, encoding="utf-8-sig")
 
-# ----------------------------------------------------------------------------- file 02: analytic sample with definitions
+
 A = P1[(P1.age >= 50) & P1.sex.isin([1, 2]) & P1.weight.notna() & P1.cesd10.notna() & (P1.crosssection == 1)].copy()
 A["agegrp"] = pd.cut(A.age, bins=[50, 55, 60, 65, 70, 75, 80, 85, 200], right=False, labels=AGES)
 A["D1_cesd10_ge10"] = (A.cesd10 >= 10).astype(int)
@@ -54,7 +45,7 @@ A["nonsomatic6_ge6"] = (A.cesd6_nonsomatic >= 6).astype(float).where(A.cesd6_non
 A["negative8_ge8"] = (A.cesd8_negative >= 8).astype(float).where(A.cesd8_negative.notna())
 A.to_csv(OUT / "02_charls_analytic_50plus_with_definitions.csv", index=False, encoding="utf-8-sig")
 
-# ----------------------------------------------------------------------------- files 03/04: weighted summaries
+
 DEFS = ["D1_cesd10_ge10", "D2_cesd10_ge12", "D3_cesd10_ge15", "D4_persistent", "D5_ge10_with_ADL", "D6_self_reported_dx",
         "D7_ge10_without_dx", "nonsomatic6_ge6", "negative8_ge8", "cesd10"]
 
@@ -83,7 +74,7 @@ for w, g in A.groupby("wave"):
             rows.append(pd.concat([pd.Series({"wave": WLAB[w], "sex": SEX[s], "agegrp": a}), wsum(ga)]))
 pd.DataFrame(rows).to_csv(OUT / "04_summary_by_wave_sex_age.csv", index=False, encoding="utf-8-sig")
 
-# ----------------------------------------------------------------------------- file 05: codebook
+
 CB = [
     ("ID", "Person ID, 12 digits (2011 IDs converted: insert '0' after position 9)"),
     ("communityID", "Community ID (PSU for variance estimation)"),
@@ -131,7 +122,7 @@ shutil.copy(HERE / "00_build_charls_panel.py", OUT / "code" / "00_build_charls_p
 shutil.copy(HERE / "03_export_charls_folder.py", OUT / "code" / "03_export_charls_folder.py")
 shutil.copy(HERE / "04_charls_flow_diagram.py", OUT / "code" / "04_charls_flow_diagram.py")
 
-# ----------------------------------------------------------------------------- README
+
 n_wave = P1.groupby("wave_label").size()
 n_an = A.groupby("wave_label").size()
 s3 = pd.read_csv(OUT / "03_summary_by_wave_sex.csv")
@@ -184,13 +175,13 @@ CES-D-10 items are aligned across waves by **content**: 2011–2018 `dc009–dc0
 
 ## Notes for users
 
-1. **The sixth wave (2021–2023) has only 175 respondents aged 45–49 years (9 men)**; the refresher sample did not replenish the youngest ages, so file 02 and all summaries start at 50 years. For ages 45–49 use 2011–2020 (in file 01).
-2. **ADL skip pattern**: in 2011–2018 the whole functional-limitation module (DB001–DB014) was not asked of about 30% of respondents, who were younger and healthier (CES-D ≥10 in only 13–19%); they are coded as having no limitation.
-3. **Sixth wave fielded over three years**: each person keeps the record of the year given by `res_wave`; `iyear` is the actual interview year (68% in 2021). Match to annual data such as GBD by interview year.
-4. **Self-reported diagnosis is lifetime**, not point prevalence; 2013/2015 combine preloaded records, confirmation and follow-up questions, and 2020 and the sixth wave combine new questions with "diagnosed at the previous wave" items.
-5. **Weights**: cross-sectional individual weights (household and individual non-response adjusted); about 9% of the sixth wave (non-cross-sectional sample) have no weight and are not in file 02. Use `communityID` as the PSU for variance estimation.
-6. **Treatment variable** (`psy_treat`) is available only in 2011–2018 and asked only of those reporting a diagnosis; the sample is small.
-7. 2011 IDs are converted to 12 digits and link to later waves by `ID`.
+- **The sixth wave (2021–2023) has only 175 respondents aged 45–49 years (9 men)**; the refresher sample did not replenish the youngest ages, so file 02 and all summaries start at 50 years. For ages 45–49 use 2011–2020 (in file 01).
+- **ADL skip pattern**: in 2011–2018 the whole functional-limitation module (DB001–DB014) was not asked of about 30% of respondents, who were younger and healthier (CES-D ≥10 in only 13–19%); they are coded as having no limitation.
+- **Sixth wave fielded over three years**: each person keeps the record of the year given by `res_wave`; `iyear` is the actual interview year (68% in 2021). Match to annual data such as GBD by interview year.
+- **Self-reported diagnosis is lifetime**, not point prevalence; 2013/2015 combine preloaded records, confirmation and follow-up questions, and 2020 and the sixth wave combine new questions with "diagnosed at the previous wave" items.
+- **Weights**: cross-sectional individual weights (household and individual non-response adjusted); about 9% of the sixth wave (non-cross-sectional sample) have no weight and are not in file 02. Use `communityID` as the PSU for variance estimation.
+- **Treatment variable** (`psy_treat`) is available only in 2011–2018 and asked only of those reporting a diagnosis; the sample is small.
+- 2011 IDs are converted to 12 digits and link to later waves by `ID`.
 
 ## Regenerate
 

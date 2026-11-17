@@ -1,16 +1,13 @@
 #!/usr/bin/env python3
-"""Harmonise CHARLS 2011, 2013, 2015, 2018, 2020 and 2021–2023 (W6) into one person-wave panel (MS1 V1).
+"""Harmonise six CHARLS waves into a person-wave panel.
 
-Run:    python3 00_build_charls_panel.py
-Input:  ../../data/raw/CHARLS/CHARLS*/raw_dta/*.dta
-Output: ../../data/processed/charls_panel_2011_2023.csv   (one row per person-wave)
-        ../../data/processed/charls_panel_README.md        (variable crosswalk, written from the code constants)
-        ./qc/panel_build_log.csv                           (row counts at each step)
+Input: data/raw/CHARLS/CHARLS*/raw_dta/*.dta.
+Outputs: data/processed/charls_panel_2011_2023.csv, variable crosswalk,
+panel documentation and sample counts in analysis/code/qc/.
 
-Rules:  CES-D items are aligned by item content, never by variable name (the numbering changed in 2020 and W6).
-        Each item 1–4 is recoded 0–3; items 5 (hopeful) and 8 (happy) are reverse-scored; the score is the sum of 10
-        items and is missing if any item is missing (sensitivity: ≤2 missing items prorated).
-"""
+CES-D items are matched by content across waves and recoded from 1–4 to
+0–3. Hopeful and happy are reverse-scored. The complete score requires
+ten items; the prorated sensitivity score permits up to two missing items."""
 
 import warnings
 from pathlib import Path
@@ -27,7 +24,7 @@ QC = HERE / "qc"
 QC.mkdir(exist_ok=True)
 RAW = HERE.parent.parent / "data" / "raw" / "CHARLS"
 
-# ----------------------------------------------------------------------------- crosswalk (item content -> variable)
+
 CESD_ITEMS = ["bothered", "mind", "depressed", "effort", "hopeful", "fearful", "sleep", "happy", "lonely", "getgoing"]
 REVERSE = {"hopeful", "happy"}
 CESD_VARS = {
@@ -38,7 +35,7 @@ CESD_VARS = {
     2020: [f"dc{i:03d}" for i in range(16, 26)],
     2026: [f"dc{i:03d}" for i in range(51, 61)],
 }
-ADL_VARS = {  # dressing, bathing, eating, bed, toilet (1 = no difficulty; 2–4 = difficulty)
+ADL_VARS = {
     2011: ["db010", "db011", "db012", "db013", "db014"],
     2013: ["db010", "db011", "db012", "db013", "db014"],
     2015: ["db010", "db011", "db012", "db013", "db014"],
@@ -46,7 +43,7 @@ ADL_VARS = {  # dressing, bathing, eating, bed, toilet (1 = no difficulty; 2–4
     2020: ["db001", "db003", "db005", "db007", "db009"],
     2026: ["db001", "db003", "db005", "db007", "db009"],
 }
-# self-reported doctor diagnosis of "emotional, nervous or psychiatric problems" (chronic-disease item 11)
+
 DX_RULE = {
     2011: "da007_11_ == 1",
     2013: "(zda007_11_ == 1 & da007_w2_1_11_ == 1) | da007_w2_2_11_ == 1 | da007_11_ == 1",
@@ -55,7 +52,7 @@ DX_RULE = {
     2020: "da003_11_ == 1 | da002_11_ in (1, 2, 3)",
     2026: "da011_11_ == 1 | da012_11_ in (1, 2, 3)",
 }
-AGE_RULE = {  # wave-reported birth year/month; the panel then uses ONE person-level birth year (mode across waves)
+AGE_RULE = {
     2011: "birth year/month ba002_1/ba002_2",
     2013: "ba002_1/ba002_2 if asked else preloaded zba002_1/zba002_2",
     2015: "actual ba002_1/ba002_2 if asked else ID-card ba004_w3_1/ba004_w3_2",
@@ -111,7 +108,7 @@ def cesd_block(df, vars_):
     items = pd.DataFrame(index=df.index)
     for name, v in zip(CESD_ITEMS, vars_):
         x = num(df, v)
-        x = x.where(x.between(1, 4))            # 997/999/8/9 = DK/RF -> missing
+        x = x.where(x.between(1, 4))
         items[f"cesd_{name}"] = (4 - x) if name in REVERSE else (x - 1)
     nmiss = items.isna().sum(axis=1)
     score = items.sum(axis=1, min_count=10)
@@ -119,10 +116,10 @@ def cesd_block(df, vars_):
     items["cesd10"] = score
     items["cesd10_prorated"] = pror
     items["cesd_nmiss"] = nmiss
-    # non-somatic sub-score (6 items: bothered, depressed, hopeful, fearful, happy, lonely)
+
     nons = [f"cesd_{k}" for k in ("bothered", "depressed", "hopeful", "fearful", "happy", "lonely")]
     items["cesd6_nonsomatic"] = items[nons].sum(axis=1, min_count=6)
-    # 8 negatively worded items (drops the two reversed positive items hopeful, happy), 0–24
+
     neg = [f"cesd_{k}" for k in CESD_ITEMS if k not in REVERSE]
     items["cesd8_negative"] = items[neg].sum(axis=1, min_count=8)
     return items
@@ -132,9 +129,8 @@ def adl_block(df, vars_):
     m = pd.DataFrame({v: num(df, v) for v in vars_})
     m = m.where((m >= 1) & (m <= 4))
     any_diff = (m >= 2).any(axis=1)
-    # In 2011–2018 the whole functional-limitation module (DB001–DB014) was skipped for ~30% of respondents, who are
-    # younger, healthier and far less depressed (checked 2026-11-12: CES-D≥10 13–19% vs 40–48% among those asked).
-    # A fully skipped module is therefore coded as "no ADL limitation"; in 2020 and W6 the items were asked of everyone.
+
+
     return any_diff.astype(float)
 
 
@@ -192,11 +188,10 @@ def hukou_block(df, wave):
         h = g("ba009")
     else:
         h = g("xrhukoutype")
-    # 1 agricultural, 2 non-agricultural, 3 unified residence, 4 none -> agricultural (rural hukou) flag
+
     return pd.Series(np.where(h.isin([1, 2, 3, 4]), (h == 1).astype(float), np.nan), index=df.index)
 
 
-# ----------------------------------------------------------------------------- per-wave builders
 def build_2011():
     w = 2011
     d = RAW / "CHARLS2011" / "raw_dta"
@@ -250,7 +245,7 @@ def build_follow(w, folder, demo_file, hs_file, cog_file, wt_file, si_file):
         by, bm = num(df, "ba002_1").fillna(num(df, "zba002_1")), num(df, "ba002_2").fillna(num(df, "zba002_2"))
     elif w in (2015, 2018):
         by, bm = num(df, "ba002_1").fillna(num(df, "ba004_w3_1")), num(df, "ba002_2").fillna(num(df, "ba004_w3_2"))
-    else:  # 2020: only the actually re-asked birth date is trustworthy (see AGE_RULE)
+    else:
         by, bm = num(df, "ba003_1"), num(df, "ba003_2")
     sex = num(df, "xrgender").fillna(num(df, "ba000_w2_3")).fillna(num(df, "xrgender_hs"))
     out = pd.DataFrame({
@@ -309,7 +304,7 @@ def finish(out, df, w):
     out["dx_emot"] = dx_block(df, w)
     out["psy_treat"] = treat_block(df, w)
     out["hukou_agri"] = hukou_block(df, w)
-    # 2011/2015: 0/1 for everyone; 2020/W6: flag only present (=1) for proxy interviews; 2013/2018: not available
+
     out["proxy"] = (out["proxy"] == 1).astype(float) if w in (2011, 2015, 2020, 2026) else np.nan
     out["byear_wave"] = out["byear_wave"].where(out["byear_wave"].between(1890, 2005))
     out["bmonth_wave"] = out["bmonth_wave"].where(out["bmonth_wave"].between(1, 12))
@@ -317,7 +312,6 @@ def finish(out, df, w):
     return out
 
 
-# ----------------------------------------------------------------------------- run
 print("Building CHARLS panel …")
 panel = pd.concat([
     build_2011(),
@@ -341,21 +335,20 @@ def person_mode(df, col):
     return df["ID"].map(cnt.set_index("ID")[col])
 
 
-# one birth year / month and one sex per person
 panel["byear"] = person_mode(panel, "byear_wave")
 panel["bmonth"] = person_mode(panel, "bmonth_wave")
 panel["sex"] = person_mode(panel, "sex_wave")
 n_noby = panel.loc[panel.byear.isna(), "ID"].nunique()
 print(f"  persons without any reported birth year: {n_noby:,} (age set missing; 2020 xrage not used)")
-# exact age at interview: subtract one year if the interview month precedes the birth month
+
 before_bday = (panel["imonth"] < panel["bmonth"]) & panel["imonth"].notna() & panel["bmonth"].notna()
 panel["age"] = (panel["iyear"] - panel["byear"] - before_bday.astype(int)).where(panel["byear"].notna())
 panel["age"] = panel["age"].where(panel["age"].between(18, 115))
-# ever told by a doctor (carry forward within person: once yes, always yes)
+
 dx0 = panel["dx_emot"].fillna(0)
 ever = dx0.groupby(panel["ID"]).cummax()
 panel["dx_emot_ever"] = np.where(panel["dx_emot"].isna() & (ever == 0), np.nan, ever)
-# persistent symptoms (D4): CES-D-10 ≥10 in this wave AND in the immediately preceding wave (adjacent waves only)
+
 ORDER = {2011: 0, 2013: 1, 2015: 2, 2018: 3, 2020: 4, 2026: 5}
 prev = panel.groupby("ID")["cesd10"].shift(1)
 prev_wave = panel.groupby("ID")["wave"].shift(1)
@@ -372,7 +365,7 @@ panel.to_csv(OUT / "charls_panel_2011_2023.csv", index=False)
 pd.DataFrame(LOG).to_csv(QC / "panel_build_log.csv", index=False)
 print(f"\nPanel: {len(panel):,} person-waves, {panel.ID.nunique():,} persons -> {OUT / 'charls_panel_2011_2023.csv'}")
 
-# ----------------------------------------------------------------------------- README (variable crosswalk)
+
 rows = []
 for w in (2011, 2013, 2015, 2018, 2020, 2026):
     rows.append({"Wave": {2026: "2021–2023 (W6)"}.get(w, str(w)), "CES-D-10 items": f"{CESD_VARS[w][0]}–{CESD_VARS[w][-1]}",
@@ -381,7 +374,7 @@ for w in (2011, 2013, 2015, 2018, 2020, 2026):
                  "Weight": WEIGHT_VAR[w]})
 cw = pd.DataFrame(rows)
 cw.to_csv(OUT / "charls_variable_crosswalk.csv", index=False)
-md = ["# CHARLS 2011–2023 person-wave panel (MS1 V1)", "",
+md = ["# CHARLS 2011–2023 person-wave panel", "",
       "Built by `analysis/code/00_build_charls_panel.py`. One row per person-wave; 2011 IDs converted to 12 digits.", "",
       "## Variable crosswalk", "", cw.to_markdown(index=False), "",
       "## Derived variables", "",

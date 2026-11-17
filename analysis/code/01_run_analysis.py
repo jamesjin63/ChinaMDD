@@ -1,14 +1,13 @@
 #!/usr/bin/env python3
-"""GBD 2023 vs CHARLS 2011–2023: depression among Chinese adults aged ≥50 — tables, figures, legends, source data, QC (MS1 V1).
+"""Compare depression measures in GBD 2023 and CHARLS among adults aged 50 or older.
 
-Run:    python3 00_build_charls_panel.py  (once)  ->  python3 01_run_analysis.py  ->  python3 02_build_tables_docx.py
-Input:  ../../data/processed/charls_panel_2011_2023.csv                (CHARLS person-wave panel, 00_build_charls_panel.py)
-        ../../data/raw/GBD2023/China_mental_disorders_GBD2023_1990_2023.csv   (GBD 2023, China)
-        ../../data/raw/WPP2024/WPP2024_PopulationByAge5GroupSex_Medium.csv.gz (UN WPP 2024)
-Style:  follows DataGBD/CancerToday/MS2/V1 (NM panel letters, Helvetica 9 pt, 300 dpi PNG + PDF, one source-data workbook per
-        figure with sheet = panel letter, legends and results summary generated from the numbers).
-Outputs go to analysis/02–08; QC files stay in ./qc.
-"""
+Inputs: the processed CHARLS panel, GBD 2023 estimates for China and
+UN WPP 2024 population projections under data/.
+Outputs: figures, tables, figure legends, source data, results summaries
+and quality-control files under analysis/.
+
+Figures use Helvetica, lettered panels, PDF and 300 dpi PNG exports.
+Source-data workbooks contain one worksheet per panel."""
 
 import re
 import warnings
@@ -26,18 +25,18 @@ from matplotlib.ticker import NullFormatter
 from matplotlib.patches import FancyBboxPatch, Patch
 
 HERE = Path(__file__).resolve().parent
-V1 = HERE.parent
-MS = V1.parent
-PANEL = MS / "data" / "processed" / "charls_panel_2011_2023.csv"
-GBD_CSV = MS / "data" / "raw" / "GBD2023" / "China_mental_disorders_GBD2023_1990_2023.csv"
-WPP_CSV = MS / "data" / "raw" / "WPP2024" / "WPP2024_PopulationByAge5GroupSex_Medium.csv.gz"
-FIG, FIG_S = V1 / "02_Figures", V1 / "05_Supplementary_Figures"
-TAB_MAIN, TAB_S = V1 / "04_Tables", V1 / "06_Supplementary_Tables"
-SD, QC = V1 / "07_SourceData", HERE / "qc"
+ANALYSIS_DIR = HERE.parent
+REPO_ROOT = ANALYSIS_DIR.parent
+PANEL = REPO_ROOT / "data" / "processed" / "charls_panel_2011_2023.csv"
+GBD_CSV = REPO_ROOT / "data" / "raw" / "GBD2023" / "China_mental_disorders_GBD2023_1990_2023.csv"
+WPP_CSV = REPO_ROOT / "data" / "raw" / "WPP2024" / "WPP2024_PopulationByAge5GroupSex_Medium.csv.gz"
+FIG, FIG_S = ANALYSIS_DIR / "02_Figures", ANALYSIS_DIR / "05_Supplementary_Figures"
+TAB_MAIN, TAB_S = ANALYSIS_DIR / "04_Tables", ANALYSIS_DIR / "06_Supplementary_Tables"
+SD, QC = ANALYSIS_DIR / "07_SourceData", HERE / "qc"
 for d in (FIG, FIG_S, TAB_MAIN, TAB_S, SD, QC):
     d.mkdir(parents=True, exist_ok=True)
 
-# ----------------------------------------------------------------------------- constants
+
 RNG = np.random.default_rng(20261112)
 NDRAW = 2000
 WAVES = [2011, 2013, 2015, 2018, 2020, 2026]
@@ -50,7 +49,7 @@ GBD_AGE = {15: "50–54", 16: "55–59", 17: "60–64", 18: "65–69", 19: "70�
 SEXES = {1: "Males", 2: "Females", 3: "Both sexes"}
 CAUSE = {568: "MDD", 567: "Depressive disorders", 571: "Anxiety disorders", 558: "Mental disorders"}
 CAUSE_LONG = {568: "GBD major depressive disorder", 567: "GBD depressive disorders"}
-DEFS = {  # code -> (column, label)
+DEFS = {
     "D1": ("d1", "CES-D-10 ≥10"), "D2": ("d2", "CES-D-10 ≥12"), "D3": ("d3", "CES-D-10 ≥15"),
     "D4": ("d4", "Persistent (≥10 in two consecutive waves)"), "D5": ("d5", "≥10 with ADL limitation"),
     "D6": ("d6", "Self-reported doctor diagnosis (ever)"), "D7": ("d7", "≥10 without diagnosis"),
@@ -100,7 +99,7 @@ def fmt(x, k=1):
     if pd.isna(x):
         return "—"
     s = f"{x:,.{k}f}"
-    if s.startswith("-") and float(s.replace(",", "")) == 0:   # no "−0" after rounding
+    if s.startswith("-") and float(s.replace(",", "")) == 0:
         s = s[1:]
     return s.replace("-", "−")
 
@@ -117,7 +116,6 @@ def age_group(a):
     return pd.cut(a, bins=AGE_LO + [200], right=False, labels=AGES)
 
 
-# ============================================================================= 1. CHARLS analytic sample
 P = pd.read_csv(PANEL, low_memory=False)
 P = P.sort_values(["ID", "wave"])
 P["hukou_agri"] = P.groupby("ID")["hukou_agri"].transform(lambda s: s.ffill().bfill())
@@ -131,14 +129,14 @@ A["d4"] = A["d4_persistent"]
 A["d5"] = np.where(A.adl_any.isna(), np.nan, ((A.d1 == 1) & (A.adl_any == 1)).astype(float))
 A["d6"] = A["dx_emot_ever"]
 A["d7"] = np.where(A.dx_emot_ever.isna(), np.nan, ((A.d1 == 1) & (A.dx_emot_ever == 0)).astype(float))
-A["d1_dxk"] = A["d1"].where(A.dx_emot_ever.notna())   # D1 on the same denominator as D7 (diagnosis answer known), for the nesting check
+A["d1_dxk"] = A["d1"].where(A.dx_emot_ever.notna())
 A["d6ns"] = (A.cesd6_nonsomatic >= 6).astype(float).where(A.cesd6_nonsomatic.notna())
-A["d8neg"] = (A.cesd8_negative >= 8).astype(float).where(A.cesd8_negative.notna())   # 8 negative items, proportional threshold 8/24
+A["d8neg"] = (A.cesd8_negative >= 8).astype(float).where(A.cesd8_negative.notna())
 for t in (8, 12, 15, 16):
     A[f"thr{t}"] = (A.cesd10 >= t).astype(float)
 A["d1_pror"] = (A.cesd10_prorated >= 10).astype(float).where(A.cesd10_prorated.notna())
-# Prorated-score sensitivity sample: same eligibility as A but requiring only a prorated score (≤2 items missing), so that
-# respondents with one or two missing items are included. Used only for the "D1pror" estimates below.
+
+
 AP = P[(P.age >= 50) & P.sex.isin([1, 2]) & P.weight.notna() & P.cesd10_prorated.notna() & (P.crosssection == 1)].copy()
 AP["agegrp"] = age_group(AP.age)
 AP["d1_pror"] = (AP.cesd10_prorated >= 10).astype(float)
@@ -149,7 +147,7 @@ A["age75"] = (A.age >= 75).astype(float)
 N_PSU = A.groupby("wave")["communityID"].nunique()
 SAMPLE = A.groupby("wave").size()
 
-# W6 interview-year shares (weighted), used to build the matched GBD comparator and the time position of W6
+
 w6 = A[A.wave == 2026]
 W6_SHARE = (w6.groupby("iyear")["weight"].sum() / w6.weight.sum())
 W6_YEAR = float((W6_SHARE.index.values * W6_SHARE.values).sum())
@@ -178,7 +176,6 @@ def ci_logit(p, se):
     return 1 / (1 + np.exp(-(l - 1.96 * s))), 1 / (1 + np.exp(-(l + 1.96 * s)))
 
 
-# ============================================================================= 2. GBD 2023 (China) by 5-year age ≥50
 G = pd.read_csv(GBD_CSV, low_memory=False)
 G = G[(G.measure_id == 5) & G.cause_id.isin([558, 567, 568, 571]) & G.age_id.isin(GBD_AGE) & (G.year >= 2011)]
 num = G[G.metric_id == 1].rename(columns={"val": "n", "lower": "n_lo", "upper": "n_hi"})
@@ -187,18 +184,18 @@ key = ["cause_id", "sex_id", "age_id", "year"]
 GB = num[key + ["n", "n_lo", "n_hi"]].merge(rate[key + ["r", "r_lo", "r_hi"]], on=key)
 GB["pop"] = GB.n / GB.r * 1e5
 GB["agegrp"] = GB.age_id.map(GBD_AGE)
-# population consistency across causes (same year/sex/age)
+
 pp = GB.pivot_table(index=["sex_id", "age_id", "year"], columns="cause_id", values="pop")
 qc("GBD population identical across causes (Number/Rate)", "max relative difference 567 vs 568, all cells",
    float(((pp[567] - pp[568]).abs() / pp[568]).max()), 1e-3)
-# lognormal draws per 5-year cell, then aggregate 85+ (sum of numbers) -> rates
+
 def lognorm_draws(val, lo, hi):
     val, lo, hi = np.asarray(val, float), np.asarray(lo, float), np.asarray(hi, float)
     sig = np.where((hi > lo) & (lo > 0), (np.log(hi) - np.log(np.maximum(lo, 1e-12))) / (2 * 1.96), 0.0)
     return np.exp(np.log(np.maximum(val, 1e-12))[None, :] + sig[None, :] * RNG.standard_normal((NDRAW, len(val))))
 
 GB = GB.reset_index(drop=True)
-DR_N = lognorm_draws(GB.n, GB.n_lo, GB.n_hi)      # draws of numbers
+DR_N = lognorm_draws(GB.n, GB.n_lo, GB.n_hi)
 GBA_rows, GBA_draws = [], []
 for (c, s, y, a), idx in GB.groupby(["cause_id", "sex_id", "year", "agegrp"]).groups.items():
     idx = list(idx)
@@ -210,12 +207,12 @@ for (c, s, y, a), idx in GB.groupby(["cause_id", "sex_id", "year", "agegrp"]).gr
 GBA = pd.DataFrame(GBA_rows)
 GBA["agegrp"] = pd.Categorical(GBA.agegrp, AGES, ordered=True)
 GBA = GBA.sort_values(["cause_id", "sex_id", "year", "agegrp"])
-GBA_D = np.column_stack([GBA_draws[i] for i in GBA.index])   # (NDRAW, rows) prevalence draws, aligned with sorted frame
+GBA_D = np.column_stack([GBA_draws[i] for i in GBA.index])
 GBA = GBA.reset_index(drop=True)
 GBA["prev_lo"] = np.percentile(GBA_D, 2.5, axis=0)
 GBA["prev_hi"] = np.percentile(GBA_D, 97.5, axis=0)
 GIDX = {k: i for i, k in enumerate(zip(GBA.cause_id, GBA.sex_id, GBA.year, GBA.agegrp.astype(str)))}
-# both sexes = males + females check
+
 both = GBA[GBA.sex_id == 3].set_index(["cause_id", "year", "agegrp"]).n
 mf = GBA[GBA.sex_id.isin([1, 2])].groupby(["cause_id", "year", "agegrp"], observed=True).n.sum()
 qc("GBD both sexes = males + females (numbers)", "max relative difference, all cause/year/age cells",
@@ -248,11 +245,10 @@ def gbd_n(cause, sex, year, a=None):
     return sub.reindex(AGES).values if a is None else sub[a]
 
 
-# standard population: GBD China 2020, both sexes, ages 50+ (8 groups)
 STD = gbd_pop(3, STD_YEAR)
 STD_W = STD / STD.sum()
 
-# ============================================================================= 3. UN WPP 2024 (medium) China 2011–2035
+
 W = pd.read_csv(WPP_CSV, low_memory=False)
 W = W[(W.Location == "China") & (W.Variant == "Medium") & W.Time.between(2011, 2035)].copy()
 W = W[W.AgeGrpStart >= 50]
@@ -271,7 +267,7 @@ for s in (1, 2, 3):
     qc("WPP 2024 vs GBD population aged ≥50, 2023", f"{SEXES[s]}: relative difference (informational, <10%)",
        float(wpp_pop(s, 2023).sum() / gbd_pop(s, 2023).sum() - 1), 0.10)
 
-# ============================================================================= 4. Module A/B: CHARLS prevalence by wave × sex × age × definition
+
 rows = []
 EST_COLS = {k: v[0] for k, v in DEFS.items()}
 EST_COLS.update({"C": "cesd10", "D6ns": "d6ns", "D8neg": "d8neg", "C8": "cesd8_negative", "D1dx": "d1_dxk", "thr8": "thr8", "thr12": "thr12", "thr15": "thr15", "thr16": "thr16", "D1pror": "d1_pror"})
@@ -311,33 +307,26 @@ def est_vec(w, s, code):
     return sub.p.values, sub.se.values, sub.lo.values, sub.hi.values
 
 
-# nesting checks
 for w in WAVES:
     for s in (1, 2, 3):
         for code in ("D2", "D3", "D5", "D7"):
-            p1, _, _, _ = est_vec(w, s, "D1dx" if code == "D7" else "D1")   # D7 is compared with D1 on the same denominator
+            p1, _, _, _ = est_vec(w, s, "D1dx" if code == "D7" else "D1")
             pk, _, _, _ = est_vec(w, s, code)
             m = ~np.isnan(pk) & ~np.isnan(p1)
             qc(f"Case definitions nested: {code} ≤ D1", f"{WLAB[w]}, {SEXES[s]}, max excess over D1 (0 = none)",
                max(0.0, float(np.nanmax(np.where(m, pk - p1, -1)))), 1e-9)
 
 
-# ============================================================================= 4b. PSU bootstrap replicates (Rao–Wu) for derived CHARLS quantities
-# Communities are resampled with replacement within each wave (m = n_c − 1 draws, Rao–Wu rescaling; the scale factor
-# cancels in every ratio estimator used here). Each replicate gives the full set of age–sex-specific prevalences, so any
-# quantity built from them (counts, projections, Shapley decomposition, Rogan–Gladen curves, ASRs under alternative
-# weights) inherits a design-based 95% CI (2.5th–97.5th percentiles) that keeps the covariance between cells sharing PSUs.
-# Single-cell prevalences and ASRs in Tables 1–2 keep the Taylor-linearised CI; a QC check compares the two for the ASR.
 NBOOT = NDRAW
 BOOT_COLS = dict(EST_COLS)
-BOOT_COLS.pop("C"), BOOT_COLS.pop("C8"), BOOT_COLS.pop("D1dx"), BOOT_COLS.pop("D1pror")   # D1pror uses its own sample (AP), Taylor CIs only
-BOOT = {}          # (wave, sex_id, agegrp | "All ≥50", code) -> array(NBOOT) of replicate prevalences
-BOOT_MULT = {}     # wave -> (community index per row, multiplicity matrix (NBOOT, n_c))
+BOOT_COLS.pop("C"), BOOT_COLS.pop("C8"), BOOT_COLS.pop("D1dx"), BOOT_COLS.pop("D1pror")
+BOOT = {}
+BOOT_MULT = {}
 for w in WAVES:
     dw = A[A.wave == w]
     cidx, comms = pd.factorize(dw.communityID)
     nc = len(comms)
-    M = RNG.multinomial(nc - 1, np.full(nc, 1.0 / nc), size=NBOOT).astype(float)   # Rao–Wu with m = n_c − 1
+    M = RNG.multinomial(nc - 1, np.full(nc, 1.0 / nc), size=NBOOT).astype(float)
     BOOT_MULT[w] = (cidx, M)
     aidx = pd.Categorical(dw.agegrp, AGES).codes
     wt = dw.weight.values
@@ -350,7 +339,7 @@ for w in WAVES:
             T = np.zeros((len(AGES), nc))
             np.add.at(S, (aidx[sel], cidx[sel]), wt[sel] * yv[sel])
             np.add.at(T, (aidx[sel], cidx[sel]), wt[sel])
-            num, den = M @ S.T, M @ T.T                      # (NBOOT, 8)
+            num, den = M @ S.T, M @ T.T
             with np.errstate(invalid="ignore", divide="ignore"):
                 P_b = np.where(den > 0, num / den, np.nan)
                 p_all = num.sum(axis=1) / den.sum(axis=1)
@@ -369,15 +358,10 @@ def pci(draws, k=(2.5, 97.5), axis=0):
     return np.nanpercentile(draws, k[0], axis=axis), np.nanpercentile(draws, k[1], axis=axis)
 
 
-# bootstrap replicates reproduce the point estimates (bias check) — D1, all waves, both sexes, 8 age groups
 _bias = max(abs(float(np.nanmean(BOOT[(w, 3, a, "D1")]) - est(w, 3, a, "D1").p)) for w in WAVES for a in AGES)
 qc("Bootstrap replicate mean equals point estimate", "D1, both sexes, all waves × age groups, max |mean − p| (ratio-estimator bias in small cells)", _bias, 0.01)
 
 
-# age-standardised rates (ASR) with the fixed standard. CHARLS SE by Taylor linearisation of the whole standardised sum
-# Σ_a STD_W[a]·p_a (one linearised score per respondent, summed within communities), which keeps the covariance between
-# age cells that share PSUs; the earlier sqrt(Σ w² se²) formula assumed independent cells and was ~30% too small
-# (see qc/asr_se_taylor_vs_bootstrap.csv). GBD UI by draws.
 def taylor_lincomb(d, ycol, cells, coef, n_psu, wcol="weight"):
     """Estimate and Taylor SE of Σ_c coef[c]·p_c, p_c = weighted proportion of `ycol` in domain c (cells: labels aligned with d)."""
     m = d[ycol].notna().values
@@ -399,7 +383,7 @@ def taylor_lincomb(d, ycol, cells, coef, n_psu, wcol="weight"):
 
 def asr_charls(w, s, code, wcol="weight", d=None):
     p, se, _, _ = est_vec(w, s, code)
-    if np.isnan(p).any():          # a cell with <20 respondents makes the ASR undefined (same rule as the cell estimates)
+    if np.isnan(p).any():
         return np.nan, np.nan
     if d is None:
         src = AP if code == "D1pror" else A
@@ -409,7 +393,7 @@ def asr_charls(w, s, code, wcol="weight", d=None):
 
 
 def asr_charls_indep(w, s, code):
-    """Former estimator (independent cells), kept only for the QC comparison."""
+    """Independent-cell variance estimator for comparison with covariance-aware estimates."""
     p, se, _, _ = est_vec(w, s, code)
     return float((STD_W * p).sum()), float(np.sqrt((STD_W ** 2 * se ** 2).sum()))
 
@@ -441,14 +425,14 @@ for cause in (568, 567, 571, 558):
             cr = gbd_n(cause, s, y).sum() / gbd_pop(s, y).sum()
             ASR.append({"source": "GBD", "def": cause, "wave": y, "year": y, "sex_id": s, "asr": a, "se": np.nan, "lo": lo, "hi": hi,
                         "crude": cr, "crude_lo": np.nan, "crude_hi": np.nan, "n": np.nan})
-    for s in (1, 2, 3):  # W6-matched mixture
+    for s in (1, 2, 3):
         a, lo, hi, _ = asr_gbd(cause, s, 2026)
         pw = gbd_pop(s, 2026)
         pm, _ = gbd(cause, s, 2026)
         ASR.append({"source": "GBD", "def": cause, "wave": 2026, "year": W6_YEAR, "sex_id": s, "asr": a, "se": np.nan, "lo": lo, "hi": hi,
                     "crude": float((pm * pw).sum() / pw.sum()), "crude_lo": np.nan, "crude_hi": np.nan, "n": np.nan})
 ASR = pd.DataFrame(ASR)
-# standardisation sanity: GBD 2020 both sexes with own population as standard equals crude
+
 p20, _ = gbd(568, 3, 2020)
 qc("ASR with own-population standard equals crude prevalence", "GBD MDD, both sexes, 2020",
    float((STD_W * p20).sum() - gbd_n(568, 3, 2020).sum() / STD.sum()), 1e-9)
@@ -459,8 +443,6 @@ def asr_row(source, code, w, s):
     return r.iloc[0]
 
 
-# Linearised Taylor SE vs PSU-bootstrap SE of the D1 ASR, both sexes, each wave (must agree within ±10%); the former
-# independent-cells SE is recorded for documentation
 ASR_BOOT_CMP = []
 for w in WAVES:
     r = asr_row("CHARLS", "D1", w, 3)
@@ -472,8 +454,6 @@ for w in WAVES:
 ASR_BOOT_CMP = pd.DataFrame(ASR_BOOT_CMP)
 
 
-# ============================================================================= 5. Module C: consistency tests
-# C1 age gradient: PR (≥75 vs 50–59) — CHARLS with delta-method CI, GBD with draws; difference of log PR by Monte Carlo
 def log_ratio(p_num, se_num, p_den, se_den):
     lr = np.log(p_num / p_den)
     se = np.sqrt((se_num / p_num) ** 2 + (se_den / p_den) ** 2)
@@ -495,7 +475,7 @@ def gbd_ratio_draws(cause, s, year, a_num, a_den):
 
 
 GRAD = []
-GRAD_GBD_DRAWS = {}   # (wave, sex_id, cause) -> draws of the GBD ≥75 vs 50–59 PR, for the pooled UI
+GRAD_GBD_DRAWS = {}
 for w in WAVES:
     for s in (1, 2, 3):
         for code in MAIN_DEFS + ["D6ns", "D8neg", "D4"]:
@@ -516,18 +496,12 @@ for w in WAVES:
 GRAD = pd.DataFrame(GRAD)
 
 
-# inverse-variance pooling of log PR across waves
 def pool(df, col, secol):
     wts = 1 / df[secol] ** 2
     m = (df[col] * wts).sum() / wts.sum()
     return m, np.sqrt(1 / wts.sum())
 
 
-# Joint Taylor linearisation for pooled estimates. The six waves share the same ~450 communities and many respondents, so
-# wave-specific estimates are not independent. Each pooled estimate Σ_k a_k θ_k (a_k = inverse-variance weights, as above)
-# gets its variance from the community totals of its linearised contributions summed over waves: Var = n/(n−1) Σ_c (u_c − ū)²,
-# u_c = Σ_k a_k z_kc, n = communities in any wave. This keeps the covariance between waves and between domains in the same
-# community. Point estimates and weights are unchanged; only the CIs of pooled quantities change.
 ALL_COMMS = pd.Index(np.sort(A.communityID.unique()))
 
 
@@ -572,7 +546,7 @@ for s in (1, 2, 3):
         row = {"sex_id": s, "def": code, "pr": np.exp(m), "pr_lo": np.exp(m - 1.96 * se), "pr_hi": np.exp(m + 1.96 * se),
                "se_joint": se, "se_independent": se_ind,
                "gbd568_pr_mean": sub.gbd568_pr.mean(), "gbd567_pr_mean": sub.gbd567_pr.mean(), "n_waves": len(sub)}
-        for cause in (568, 567):   # UI of the GBD ratio averaged over the same waves (mean of draws across waves)
+        for cause in (568, 567):
             gd = np.mean([GRAD_GBD_DRAWS[(w, s, cause)] for w in sub.wave], axis=0)
             row[f"gbd{cause}_pr_lo"], row[f"gbd{cause}_pr_hi"] = pci(gd)
         POOLED_GRAD.append(row)
@@ -586,7 +560,6 @@ for _, _r in POOLED_GRAD[(POOLED_GRAD.sex_id == 3) & POOLED_GRAD["def"].isin(["D
     qc("Pooled PR: joint-linearised SE / independent-wave SE (informational)", f"{_r['def']}, both sexes", float(_r.se_joint / _r.se_independent - 1), 0.50)
 
 
-# survey-weighted logistic regression: OR per 10 years of age (cluster-robust by community), D1 per wave × sex, and pooled
 def logit_or(d, y="d1", per=10.0, return_if=False):
     """Survey-weighted logistic regression by IRLS with a cluster-robust (community) sandwich; OR per `per` years."""
     d = d[d[y].notna()]
@@ -610,7 +583,7 @@ def logit_or(d, y="d1", per=10.0, return_if=False):
     np.add.at(Sc, cl, S)
     V = bread @ (Sc.T @ Sc * G / (G - 1)) @ bread
     se = np.sqrt(V[1, 1])
-    if return_if:   # community influence of the log-OR (age) coefficient, for joint pooling across waves
+    if return_if:
         infl = pd.Series((Sc @ bread)[:, 1], index=pd.factorize(d.communityID)[1]).reindex(ALL_COMMS, fill_value=0.0)
         return np.exp(b[1]), np.exp(b[1] - 1.96 * se), np.exp(b[1] + 1.96 * se), infl
     return np.exp(b[1]), np.exp(b[1] - 1.96 * se), np.exp(b[1] + 1.96 * se)
@@ -628,7 +601,7 @@ for w in WAVES:
 OR = pd.DataFrame(OR)
 OR["se_log"] = (np.log(OR.hi) - np.log(OR.lo)) / (2 * 1.96)
 OR["log_or"] = np.log(OR.or_10y)
-# inverse-variance pooled OR across waves (same pooling as the PRs)
+
 OR_POOLED = []
 for s in (1, 2, 3):
     for code in ("D1", "D2", "D3", "D6ns"):
@@ -646,7 +619,6 @@ def wls_slope(x, Y, w):
     return ((w * (x - xm)) * (Y - ym[..., None])).sum(axis=-1) / (w * (x - xm) ** 2).sum()
 
 
-# GBD-equivalent slope: log-linear regression of log prevalence on age midpoint (weighted by population), per 10 years; UI from draws
 GSLOPE = []
 GSLOPE_DRAWS = {}
 for cause in (568, 567):
@@ -663,7 +635,7 @@ GSLOPE = pd.DataFrame(GSLOPE)
 qc("Vectorised WLS slope equals polyfit", "GBD MDD 2023 both sexes, point estimate",
    float(wls_slope(np.array(AGE_MID), np.log(gbd(568, 3, 2020)[0]), gbd_pop(3, 2020)) - np.polyfit(np.array(AGE_MID), np.log(gbd(568, 3, 2020)[0]), 1, w=np.sqrt(gbd_pop(3, 2020)))[0]), 1e-9)
 
-# C2 sex ratio: females / males PR by age group; CHARLS per wave + pooled; GBD with draws
+
 SEXR = []
 for a in AGES + ["All ≥50"]:
     for code in ("D1", "D2", "D3", "D5"):
@@ -695,7 +667,7 @@ for a in AGES + ["All ≥50"]:
             SEXR.append({"agegrp": a, "def": cause, "wave": w, "source": "GBD", "ratio": rf / rm, "lo": np.percentile(d, 2.5), "hi": np.percentile(d, 97.5)})
 SEXR = pd.DataFrame(SEXR)
 
-# C3 item-level endorsement (≥3 days, i.e. item score ≥2) by age group, all waves pooled with wave-equalised weights
+
 ITEM_NAMES = {"bothered": "Bothered by things", "mind": "Trouble concentrating", "depressed": "Felt depressed", "effort": "Everything an effort",
               "hopeful": "Hopeful about future (reversed)", "fearful": "Felt fearful", "sleep": "Restless sleep", "happy": "Was happy (reversed)",
               "lonely": "Felt lonely", "getgoing": "Could not get going"}
@@ -710,7 +682,7 @@ for a in AGES:
         ITEM.append({"agegrp": a, "item": lab, "somatic": k in SOMATIC, "pct": 100 * np.average(y, weights=sub.w_eq)})
 ITEM = pd.DataFrame(ITEM)
 
-# C4 trend: changes in ASR between waves (CHARLS) and between matched years (GBD)
+
 TREND = []
 for code in MAIN_DEFS + ["D8neg", "D6ns"]:
     for s in (1, 2, 3):
@@ -719,7 +691,7 @@ for code in MAIN_DEFS + ["D8neg", "D6ns"]:
             TREND.append({"source": "CHARLS", "def": code, "sex_id": s, "from": WLAB[w0], "to": WLAB[w1], "asr_from": r0.asr, "asr_to": r1.asr,
                           "abs_change": r1.asr - r0.asr, "rel_change": r1.asr / r0.asr - 1,
                           "rel_lo": np.nan, "rel_hi": np.nan})
-            # CI of the relative change by delta method (independent waves)
+
             se = np.sqrt((r0.se / r0.asr) ** 2 + (r1.se / r1.asr) ** 2)
             TREND[-1]["rel_lo"], TREND[-1]["rel_hi"] = np.exp(np.log(r1.asr / r0.asr) - 1.96 * se) - 1, np.exp(np.log(r1.asr / r0.asr) + 1.96 * se) - 1
 for cause in (568, 567):
@@ -732,14 +704,12 @@ for cause in (568, 567):
                           "abs_change": a1 - a0, "rel_change": a1 / a0 - 1, "rel_lo": np.percentile(rel, 2.5), "rel_hi": np.percentile(rel, 97.5)})
 TREND = pd.DataFrame(TREND)
 
-# ============================================================================= 6. Module E: numbers of people, 2011–2035
+
 def counts_from_rates(rates_by_sex, pops_by_sex):
     """rates_by_sex/pops_by_sex: {1: vec(9), 2: vec(9)} -> total persons."""
     return float(sum((rates_by_sex[s] * pops_by_sex[s]).sum() for s in (1, 2)))
 
 
-# Draws of every count: CHARLS from the PSU bootstrap (rates × fixed population), GBD from the lognormal UI draws.
-# Keyed (source, def, year, scenario, column) -> array(NDRAW); used for Table 3, Supp Tables 11 and 12, Figs 4–5 and Supp Fig. 7.
 CNT_DRAWS = {}
 SLICES = {"n45": slice(0, 8), "n60": slice(2, 8), "n75": slice(5, 8)}
 
@@ -753,7 +723,7 @@ def gbd_rate_draws(cause, year):
     return {s: gbd(cause, s, year)[1] for s in (1, 2)}
 
 
-CNT = []  # observed period
+CNT = []
 for w in WAVES:
     pops = {s: gbd_pop(s, w) for s in (1, 2)}
     for code in MAIN_DEFS + ["D4", "D7"]:
@@ -783,8 +753,8 @@ for cause in (568, 567):
         CNT.append(row)
 CNT = pd.DataFrame(CNT)
 qc("GBD count by age groups sums to all ≥50 (2023, MDD)", "sum of 8 groups vs stored", 0.0, 1e-6)
-# "2023" planning base for CHARLS: 2021–2023 rates × GBD 2023 population (the time-series point above sits at 2021.4 and uses the
-# population of the mixture year, which is 4% smaller; Table 3, the legends and the summary use this 2023 basis)
+
+
 SCEN23 = "2021–2023 rates × GBD 2023 population"
 CNT23 = []
 for code in MAIN_DEFS + ["D4", "D7"]:
@@ -801,7 +771,7 @@ for code in MAIN_DEFS + ["D4", "D7"]:
     row["lo"], row["hi"] = row["n45_lo"], row["n45_hi"]
     CNT23.append(row)
 CNT23 = pd.DataFrame(CNT23)
-# Linearised Taylor SE vs bootstrap SE for the 2021–2023 D1 count (coefficients = population of each sex × age cell)
+
 _d = A[A.wave == 2026]
 _cells = _d.sex.astype(int).astype(str) + "|" + _d.agegrp.astype(str)
 _coef = {f"{s}|{a}": gbd_pop(s, 2026)[j] for s in (1, 2) for j, a in enumerate(AGES)}
@@ -811,8 +781,6 @@ qc("Bootstrap SE of count vs linearised Taylor SE", "D1, 2021–2023, persons �
    float(np.std(CNT_DRAWS[("CHARLS", "D1", 2026, "observed", "n45")], ddof=1) / _se_t - 1), 0.10)
 
 
-# cell-level trend on the logit scale for the CHARLS trend scenario (point estimate and bootstrap replicates share the
-# inverse-variance weights of the point estimate; each replicate refits the line to its own cell prevalences)
 def _trend_fit(code):
     """Returns {s: (x (6,), weights (6,), A (2,6) WLS operator)} per sex and age group index."""
     fits = {}
@@ -826,7 +794,7 @@ def _trend_fit(code):
                 xs.append(WAVE_X[w]), ws.append((r.p * (1 - r.p) / r.se) ** 2), keep.append(w)
             X = np.column_stack([np.ones(len(xs)), np.array(xs)])
             Wm = np.diag(ws)
-            fits[(s, j)] = (keep, np.linalg.solve(X.T @ Wm @ X, X.T @ Wm))    # A: coef = A @ y
+            fits[(s, j)] = (keep, np.linalg.solve(X.T @ Wm @ X, X.T @ Wm))
     return fits
 
 
@@ -843,7 +811,7 @@ def trend_rates(code, year, draws=False):
             if draws:
                 Pb = np.column_stack([BOOT[(w, s, a, code)] for w in keep])
                 Pb = np.clip(Pb, 1e-6, 1 - 1e-6)
-                coef = np.log(Pb / (1 - Pb)) @ Amat.T                       # (NDRAW, 2)
+                coef = np.log(Pb / (1 - Pb)) @ Amat.T
                 cols.append(1 / (1 + np.exp(-(coef[:, 0] + coef[:, 1] * year))))
             else:
                 y = np.array([np.log(est(w, s, a, code).p / (1 - est(w, s, a, code).p)) for w in keep])
@@ -853,7 +821,6 @@ def trend_rates(code, year, draws=False):
     return out
 
 
-# check that the closed-form WLS reproduces np.polyfit for one cell
 _k, _A = TREND_FIT["D1"][(1, 0)]
 _ys = np.array([np.log(est(w, 1, "50–54", "D1").p / (1 - est(w, 1, "50–54", "D1").p)) for w in _k])
 _ws = np.array([(est(w, 1, "50–54", "D1").p * (1 - est(w, 1, "50–54", "D1").p) / est(w, 1, "50–54", "D1").se) ** 2 for w in _k])
@@ -886,7 +853,7 @@ for y in PROJ_YEARS:
             row["lo"], row["hi"] = row["n45_lo"], row["n45_hi"]
             PROJ.append(row)
 PROJ = pd.DataFrame(PROJ)
-# recomputation check for one projection cell
+
 chk = PROJ[(PROJ.source == "GBD") & (PROJ["def"] == 568) & (PROJ.year == 2035)].n45.iloc[0]
 re_ = sum((gbd(568, s, 2023)[0] * wpp_pop(s, 2035)).sum() for s in (1, 2))
 qc("Projection = Σ rate × WPP population", "GBD MDD constant rates, 2035", float(chk - re_), 1e-6)
@@ -901,8 +868,6 @@ def cnt_draws(source, code, year, scenario="observed", col="n45"):
     return CNT_DRAWS[(source, code, year, scenario, col)]
 
 
-# three-factor decomposition (population size, age–sex structure, age–sex-specific rates), Shapley over 3! orderings.
-# r1/r2 may be vectors (16,) or draw matrices (NDRAW, 16); all components then come back per draw.
 def decomp3(P1, c1, r1, P2, c2, r2):
     f = lambda P, c, r: P * (c * r).sum(axis=-1)
     import itertools
@@ -983,9 +948,7 @@ _r = DEC[(DEC.period.str.startswith("2023")) & (DEC.source == "CHARLS") & (DEC["
 qc("Ageing share point estimate lies inside its bootstrap CI", "2023→2035 CHARLS D1 (0 = inside)",
    max(0.0, _r.share_structure_lo - _r.share_structure, _r.share_structure - _r.share_structure_hi), 1e-9)
 
-# ============================================================================= 7. Module D: tipping-point (Rogan–Gladen) curves
-# true prevalence π = (p + Sp − 1)/(Se + Sp − 1)  ⇒  for a target π_G:  Sp = (1 − p − π_G + π_G·Se)/(1 − π_G)
-# CI of the required specificity: joint draws of the CHARLS apparent prevalence (PSU bootstrap) and the GBD prevalence (UI draws).
+
 TIP = []
 SE_GRID = np.linspace(0.5, 1.0, 101)
 for code in ("D1", "D2", "D3"):
@@ -999,7 +962,7 @@ for code in ("D1", "D2", "D3"):
         pgd = (pdraw * pw[None, :]).sum(axis=1) / pw.sum()
         pg_lo, pg_hi = pci(pgd)
         sp = (1 - p - pg + pg * SE_GRID) / (1 - pg)
-        spd = (1 - pb[:, None] - pgd[:, None] + pgd[:, None] * SE_GRID[None, :]) / (1 - pgd[:, None])   # (NDRAW, 101)
+        spd = (1 - pb[:, None] - pgd[:, None] + pgd[:, None] * SE_GRID[None, :]) / (1 - pgd[:, None])
         sp_lo, sp_hi = pci(spd)
         for se_, sp_, l_, h_ in zip(SE_GRID, sp, sp_lo, sp_hi):
             TIP.append({"def": code, "cause_id": cause, "p_charls": p, "p_charls_lo": r.lo, "p_charls_hi": r.hi,
@@ -1008,10 +971,8 @@ TIP = pd.DataFrame(TIP)
 _t = TIP[(TIP["def"] == "D1") & (TIP.cause_id == 568) & np.isclose(TIP.Se, 0.9)].iloc[0]
 qc("Tipping-point Sp point estimate lies inside its CI", "D1 vs GBD MDD at Se = 0.90 (0 = inside)",
    max(0.0, _t.Sp_required_lo - _t.Sp_required, _t.Sp_required - _t.Sp_required_hi), 1e-9)
-# Published CES-D-10 accuracy against a clinical diagnosis, placed only on the panel whose threshold matches the published cut-off.
-# Literature search 2026-11-17 (PubMed + web): no mainland-China community study of CES-D-10 against a structured diagnostic interview exists.
-# Andresen 1994 reports only agreement with CES-D-20 (kappa 0.97), no Se/Sp, so it is not plotted; Irwin 1999 (Se 0.97/Sp 0.84 middle-aged,
-# 1.00/0.93 aged >60) used dichotomous item scoring (cut-off 4), not the 0-30 scoring used in CHARLS; Blank 2004 does not state the cut-off in the abstract.
+
+
 REF_POINTS = [
     {"def": "D2", "study": "Cheng & Chan 2005", "doi": "10.1002/gps.1314", "population": "Hong Kong, aged ≥60 y referred for psychiatric assessment (n = 398)",
      "reference": "psychiatrist diagnosis, spectrum of depressive disorders", "cutoff": 12, "Se": 0.76, "Sp": 0.55},
@@ -1019,11 +980,10 @@ REF_POINTS = [
 REF_TAB = pd.DataFrame(REF_POINTS)
 for _r in REF_POINTS:
     _p = float(TIP.loc[TIP["def"] == _r["def"], "p_charls"].iloc[0])
-    _r["pi_corrected"] = (_p + _r["Sp"] - 1) / (_r["Se"] + _r["Sp"] - 1)   # Rogan–Gladen at the published Se/Sp (negative = apparent < 1 − Sp)
+    _r["pi_corrected"] = (_p + _r["Sp"] - 1) / (_r["Se"] + _r["Sp"] - 1)
 REF_TAB = pd.DataFrame(REF_POINTS)
 
-# ============================================================================= 8. Tables
-# Table 1 sample characteristics by wave (weighted)
+
 def wmean(d, col):
     m = d[col].notna()
     return np.average(d.loc[m, col], weights=d.loc[m, "weight"]) if m.any() else np.nan
@@ -1060,12 +1020,12 @@ chars = [("Respondents aged ≥50 y with complete CES-D-10 (n)", lambda d, w: f"
 for name, f in chars:
     T1.append({"Characteristic": name, **{WLAB[w]: f(A[A.wave == w], w) for w in WAVES}})
 T1 = pd.DataFrame(T1)
-# Table 1 outcome rows equal the weighted means computed directly
+
 qc("Table 1 D1 cell equals direct weighted mean", "2011",
    float(abs(float(T1.loc[T1.Characteristic.str.startswith("CES-D-10 ≥10"), "2011"].iloc[0].split(" ")[0]) - round(100 * wmean(A[A.wave == 2011], "d1"), 1))), 0.051)
 T1.to_csv(TAB_MAIN / "Table1_CHARLS_sample_2011_2023.csv", index=False, encoding="utf-8-sig")
 
-# Table 2 age-standardised prevalence (%) ≥50, both sexes, by wave: CHARLS definitions and matched GBD
+
 T2 = []
 for code in list(DEFS):
     row = {"Source": "CHARLS", "Case definition": f"{code}: {DEFS[code][1]}"}
@@ -1082,7 +1042,7 @@ for cause in (568, 567):
 T2 = pd.DataFrame(T2)
 T2.to_csv(TAB_MAIN / "Table2_ASR_by_definition_and_wave.csv", index=False, encoding="utf-8-sig")
 
-# Table 3 planning base: persons ≥50 (millions) in 2023 and 2035; ratio to GBD MDD; ageing contribution
+
 def cnt(source, code, year, scenario=None, col="n45"):
     if year <= 2023 and source == "GBD":
         return CNT[(CNT.source == "GBD") & (CNT["def"] == code) & (CNT.year == year)][col].iloc[0]
@@ -1102,7 +1062,7 @@ def fmt_draws(point, draws, scale=1.0, k=1):
 
 
 T3 = []
-T3_NUM = []   # numeric companion (point, lo, hi per cell) for QC and the summary
+T3_NUM = []
 base23 = cnt("GBD", 568, 2023)
 base35 = cnt("GBD", 568, 2035)
 base23_d = cnt_draws("GBD", 568, 2023)
@@ -1153,14 +1113,14 @@ titles = pd.DataFrame([
     {"file": "Table1_CHARLS_sample_2011_2023", "title": "Table 1 | Characteristics of CHARLS respondents aged 50 years or older with complete CES-D-10, by survey wave, 2011–2023",
      "note": "Weighted with cross-sectional individual weights adjusted for household and individual non-response; n and PSUs are unweighted. The mean CES-D-10 score and the prevalence of each case definition are given with 95% confidence intervals (Taylor linearization with communities as primary sampling units; logit-scale intervals for proportions); the other characteristics are point estimates describing the sample. ADL, activities of daily living (dressing, bathing, eating, transferring, toileting); in 2011–2018 the functional-limitation module was skipped for about 30% of respondents, who were younger and healthier, and these are coded as having no limitation. D4 requires participation in the previous wave and is therefore not defined in 2011. D6 is a lifetime self-report of a doctor's diagnosis of emotional, nervous or psychiatric problems. Proxy status is not recorded in 2013 and 2018 (n/a). The 2021–2023 wave was fielded over three years; each respondent is counted once in their response year."},
     {"file": "Table2_ASR_by_definition_and_wave", "title": "Table 2 | Age-standardized prevalence (%) of depression among adults aged 50 years or older in China by case definition and survey wave: CHARLS 2011–2023 and matched GBD 2023 estimates",
-     "note": f"All rates are standardized to the same population (GBD China {STD_YEAR}, both sexes, eight 5-year groups from 50–54 to 85+). CHARLS: survey-weighted prevalence with 95% confidence intervals (Taylor linearization of the standardized sum with communities as PSUs, which retains the covariance between age groups sampled from the same communities). GBD: prevalence from IHME GBD 2023 with 95% uncertainty intervals approximated by Monte Carlo sampling of age-specific UIs assuming independence between age groups. For the 2021–2023 wave the GBD comparator is the mixture of GBD 2021, 2022 and 2023 weighted by the CHARLS interview-year distribution ({', '.join(f'{int(y)}: {100*s:.0f}%' for y, s in W6_SHARE.items())}). CES-D-10 is a symptom scale and not a diagnostic instrument; levels are not directly comparable with GBD and are shown to document the range across definitions (design §5.1)."},
+     "note": f"All rates are standardized to the same population (GBD China {STD_YEAR}, both sexes, eight 5-year groups from 50–54 to 85+). CHARLS: survey-weighted prevalence with 95% confidence intervals (Taylor linearization of the standardized sum with communities as PSUs, which retains the covariance between age groups sampled from the same communities). GBD: prevalence from IHME GBD 2023 with 95% uncertainty intervals approximated by Monte Carlo sampling of age-specific UIs assuming independence between age groups. For the 2021–2023 wave the GBD comparator is the mixture of GBD 2021, 2022 and 2023 weighted by the CHARLS interview-year distribution ({', '.join(f'{int(y)}: {100*s:.0f}%' for y, s in W6_SHARE.items())}). CES-D-10 is a symptom scale and not a diagnostic instrument; levels are not directly comparable with GBD and are shown to document the range across definitions."},
     {"file": "Table3_planning_base_2023_2035", "title": "Table 3 | Numbers of adults aged 50 years or older in China meeting each depression definition in 2023 and projected to 2035 under the GBD 2023 and CHARLS age- and sex-specific rates",
-     "note": f"Values are estimates with 95% intervals in parentheses. 2023 counts apply the age- and sex-specific prevalence to the GBD 2023 population (CHARLS rates are those of the 2021–2023 wave; GBD counts are the published 2023 numbers). 2035 counts apply the same rates to the UN World Population Prospects 2024 medium-variant population; they are demographic scenarios, not forecasts of risk. Because the WPP 2023 population aged ≥50 is 3% smaller than the GBD 2023 population, the change 2023–2035 and the share from ageing are both computed on the WPP series (rates × WPP 2023 → rates × WPP 2035, as in the decomposition of Fig. 5b and Supplementary Table 11) rather than from the two count columns. Intervals for CHARLS-based cells come from a design-based bootstrap of the survey ({NBOOT:,} replicates resampling communities, the primary sampling units, with replacement within each wave and recomputing every age–sex-specific prevalence and all derived quantities); intervals for GBD-based cells propagate the published 95% uncertainty intervals of each age–sex cell by lognormal Monte Carlo draws ({NDRAW:,}); ratios and gaps combine the two sets of draws, treating the sources as independent. Populations are held fixed. Share of increase from ageing is the age–sex-structure term of a three-factor decomposition (population size, age–sex structure, rates) divided by the total change (n/a when the total change is below 10% of the baseline); with constant rates the rate term is zero. Trend continued extrapolates the 2011–2023 cell-level logit trends of CHARLS prevalence to 2035 (each bootstrap replicate refits the trend) and is shown only as a bound. ref., reference category. None of these numbers is a count of clinically diagnosed patients; they are planning bases under different definitions (design §10)."},
+     "note": f"Values are estimates with 95% intervals in parentheses. 2023 counts apply the age- and sex-specific prevalence to the GBD 2023 population (CHARLS rates are those of the 2021–2023 wave; GBD counts are the published 2023 numbers). 2035 counts apply the same rates to the UN World Population Prospects 2024 medium-variant population; they are demographic scenarios, not forecasts of risk. Because the WPP 2023 population aged ≥50 is 3% smaller than the GBD 2023 population, the change 2023–2035 and the share from ageing are both computed on the WPP series (rates × WPP 2023 → rates × WPP 2035, as in the decomposition of Fig. 5b and Supplementary Table 11) rather than from the two count columns. Intervals for CHARLS-based cells come from a design-based bootstrap of the survey ({NBOOT:,} replicates resampling communities, the primary sampling units, with replacement within each wave and recomputing every age–sex-specific prevalence and all derived quantities); intervals for GBD-based cells propagate the published 95% uncertainty intervals of each age–sex cell by lognormal Monte Carlo draws ({NDRAW:,}); ratios and gaps combine the two sets of draws, treating the sources as independent. Populations are held fixed. Share of increase from ageing is the age–sex-structure term of a three-factor decomposition (population size, age–sex structure, rates) divided by the total change (n/a when the total change is below 10% of the baseline); with constant rates the rate term is zero. Trend continued extrapolates the 2011–2023 cell-level logit trends of CHARLS prevalence to 2035 (each bootstrap replicate refits the trend) and is shown only as a bound. ref., reference category. None of these numbers is a count of clinically diagnosed patients; they are planning bases under different definitions."},
 ])
 titles.to_csv(TAB_MAIN / "table_titles_notes.csv", index=False, encoding="utf-8-sig")
 
-# Supplementary tables
-cw = pd.read_csv(MS / "data" / "processed" / "charls_variable_crosswalk.csv")
+
+cw = pd.read_csv(REPO_ROOT / "data" / "processed" / "charls_variable_crosswalk.csv")
 cw.to_csv(TAB_S / "SuppTable2_CHARLS_variable_crosswalk.csv", index=False, encoding="utf-8-sig")
 S2 = EST[EST.agegrp.isin(AGES + ["All ≥50"]) & EST["def"].isin(list(DEFS) + ["C"])].copy()
 S2["wave"] = S2.wave.map(WLAB)
@@ -1196,7 +1156,7 @@ S8.to_csv(TAB_S / "SuppTable11_decomposition.csv", index=False, encoding="utf-8-
 S9 = pd.concat([CNT.assign(scenario="observed"), CNT23, PROJ], ignore_index=True)
 S9["def"] = S9["def"].map(lambda x: CAUSE.get(x, x) if isinstance(x, (int, np.integer)) else x)
 S9.to_csv(TAB_S / "SuppTable12_counts_2011_2035.csv", index=False, encoding="utf-8-sig")
-# sensitivity: D1 ASR both sexes under alternative choices — every cell "ASR (95% CI)", CI by Taylor linearisation as in Table 2
+
 def asr_from(d, ycol, wcol, n_psu):
     """ASR (%) with linearised Taylor SE from a frame `d` using weight column `wcol` (same estimator as Table 2)."""
     dd = d[[ycol, wcol, "communityID", "agegrp"]].rename(columns={wcol: "weight"})
@@ -1216,14 +1176,14 @@ for w in WAVES:
         row[lab] = fmt_ci(100 * r.asr, 100 * r.lo, 100 * r.hi)
         num[lab] = (100 * r.asr, 100 * r.lo, 100 * r.hi)
     d = A[(A.wave == w)].copy()
-    # unweighted crude: equal weights, SE still clustered by community
+
     d["one"] = 1.0
     p, se, _, _ = wprev(d.assign(weight=1.0), "d1", N_PSU[w])
     lo, hi = ci_logit(p, se)
     row["unweighted crude ≥10"] = fmt_ci(100 * p, 100 * lo, 100 * hi)
     num["unweighted crude ≥10"] = (100 * p, 100 * lo, 100 * hi)
     qc("Sensitivity: unweighted crude equals simple mean", WLAB[w], float(p - d.d1.mean()), 1e-9)
-    # excluding proxy interviews where recorded
+
     if d.proxy.notna().any():
         v = asr_from(d[d.proxy == 0], "d1", "weight", N_PSU[w])
         row["excluding proxy interviews (ASR)"] = fmt_ci(*v)
@@ -1244,25 +1204,24 @@ SENS.to_csv(TAB_S / "SuppTable10_sensitivity_D1.csv", index=False, encoding="utf
 qc("Sensitivity base column equals Table 2 D1 ASR", "2011 both sexes", float(SENS_NUM[0]["D1 base (≥10, complete items)"][0] - 100 * asr_row("CHARLS", "D1", 2011, 3).asr), 1e-9)
 ASR_BOOT_CMP.to_csv(QC / "asr_se_taylor_vs_bootstrap.csv", index=False, encoding="utf-8-sig")
 ITEM.to_csv(TAB_S / "SuppTable6_item_endorsement_by_age.csv", index=False, encoding="utf-8-sig")
-# markdown copies of main tables
+
 for f in TAB_MAIN.glob("Table*.csv"):
     pd.read_csv(f, encoding="utf-8-sig", dtype=str, keep_default_na=False).to_markdown(open(f.with_suffix(".md"), "w", encoding="utf-8"), index=False, disable_numparse=True)
-# all supplementary tables in one workbook
+
 with pd.ExcelWriter(TAB_S / "All_supplementary_tables_GBD_vs_CHARLS.xlsx") as xw:
     for f in sorted(TAB_S.glob("SuppTable*.csv"), key=lambda f: (int(re.match(r"SuppTable(\d+)", f.stem).group(1)), f.stem)):
         pd.read_csv(f, encoding="utf-8-sig").to_excel(xw, sheet_name=f.stem.split("_")[0], index=False)
-# Table 2 cross-check against the ASR frame
+
 r = asr_row("CHARLS", "D1", 2011, 3)
 qc("Table 2 cell equals ASR frame", "D1 2011 both sexes", float(abs(float(T2.loc[0, "2011"].split(" ")[0]) - round(100 * r.asr, 1))), 0.051)
 
-# ============================================================================= 9. Figures
+
 def shade_periods(ax, y0=None):
     ax.axvspan(2010.5, 2023.5, color=PERIOD_COL["observed"], zorder=0, lw=0)
     ax.axvspan(2023.5, 2026.5, color=PERIOD_COL["nowcast"], zorder=0, lw=0)
     ax.axvspan(2026.5, 2035.5, color=PERIOD_COL["projection"], zorder=0, lw=0)
 
 
-# ---- Figure 1: age-specific prevalence, GBD vs CHARLS definitions, by sex, three waves
 def fig1():
     show = [2011, 2018, 2026]
     fig, axes = plt.subplots(2, 3, figsize=(7.4, 5.2), sharex=True, sharey=True)
@@ -1312,7 +1271,6 @@ def fig1():
 fig1()
 
 
-# ---- Figure 2: female-to-male ratio by age group
 def fig2():
     fig, axes = plt.subplots(1, 2, figsize=(7.2, 3.3), sharey=True)
     panels = {}
@@ -1354,14 +1312,13 @@ def fig2():
 fig2()
 
 
-# ---- Figure 3: age-standardised prevalence 2011–2023, levels and index
 def fig3():
     fig, axes = plt.subplots(2, 2, figsize=(7.2, 5.4))
     panels = {}
     specs = [("a", 3, "level"), ("b", 3, "index"), ("c", 1, "index"), ("d", 2, "index")]
     for ax, (letter, s, mode) in zip(axes.flat, specs):
         rows = []
-        ax.axvspan(2021, 2023, color="#E6E6E6", lw=0, zorder=0)   # fieldwork window of the 2021–2023 wave
+        ax.axvspan(2021, 2023, color="#E6E6E6", lw=0, zorder=0)
         for code in MAIN_DEFS:
             sub = ASR[(ASR.source == "CHARLS") & (ASR["def"] == code) & (ASR.sex_id == s)].sort_values("year")
             base = sub.asr.iloc[0]
@@ -1405,7 +1362,6 @@ def fig3():
 fig3()
 
 
-# ---- Figure 4: numbers of people 2011–2035
 def fig4():
     fig, axes = plt.subplots(1, 2, figsize=(7.4, 3.6))
     panels = {}
@@ -1433,7 +1389,7 @@ def fig4():
             add_rows("CHARLS", code, "observed", sub)
             for scen, ls_, al in (("constant 2021–2023 rates", "--", 0.9), ("2011–2023 trend continued", ":", 0.9)):
                 pr = PROJ[(PROJ.source == "CHARLS") & (PROJ["def"] == code) & (PROJ.scenario == scen)].sort_values("year")
-                if scen.startswith("constant"):   # 95% CI band for the constant-rate scenario; the trend-scenario CI is in the source data and Supp Table 12
+                if scen.startswith("constant"):
                     ax.fill_between([W6_YEAR] + list(pr.year), [sub[lo_c].iloc[-1] / 1e6] + list(pr[lo_c] / 1e6), [sub[hi_c].iloc[-1] / 1e6] + list(pr[hi_c] / 1e6), color=COL[code], alpha=0.15, lw=0)
                 ax.plot([W6_YEAR] + list(pr.year), [sub[col].iloc[-1] / 1e6] + list(pr[col] / 1e6), ls_, color=COL[code], lw=1.0, alpha=al)
                 add_rows("CHARLS", code, scen, pr)
@@ -1459,7 +1415,6 @@ def fig4():
 fig4()
 
 
-# ---- Figure 5: decomposition
 def fig5():
     fig, axes = plt.subplots(1, 2, figsize=(7.4, 3.6), sharey=False)
     panels = {}
@@ -1495,7 +1450,6 @@ def fig5():
 fig5()
 
 
-# ---- Figure 6: tipping-point Se/Sp curves
 def fig6():
     fig, axes = plt.subplots(1, 3, figsize=(7.4, 3.5), sharey=True)
     panels = {}
@@ -1505,7 +1459,7 @@ def fig6():
             t = sub[sub.cause_id == cause]
             ax.fill_between(t.Se, t.Sp_required_lo, t.Sp_required_hi, color=COL[cause], alpha=0.2, lw=0)
             ax.plot(t.Se, t.Sp_required, LS[cause], color=COL[cause], lw=1.5, label=f"target: {CAUSE_LONG[cause]}")
-        ax.fill_between([0.5, 1], [0.0, 0.0], [0.5, 0.0], color="#E6E6E6", lw=0)  # below Sp = 1 − Se: Se + Sp < 1, worse than chance, uninformative
+        ax.fill_between([0.5, 1], [0.0, 0.0], [0.5, 0.0], color="#E6E6E6", lw=0)
         ax.plot([0.5, 1.0], [0.5, 0.0], color="#AAAAAA", lw=0.6, ls="-")
         for rp in [r for r in REF_POINTS if r["def"] == code]:
             ax.plot(rp["Se"], rp["Sp"], "o", color="black", ms=5, label=f"{rp['study']} (Hong Kong, CES-D-10 ≥{rp['cutoff']} vs psychiatrist diagnosis)")
@@ -1539,7 +1493,6 @@ def fig6():
 fig6()
 
 
-# ---- Supplementary figures
 def sfig1():
     fig, axes = plt.subplots(2, 6, figsize=(9.6, 4.2), sharex=True, sharey=True)
     panels, k = {}, 0
@@ -1807,7 +1760,7 @@ def sfig7():
 
 sfig7()
 
-# ============================================================================= 10. Key numbers for legends / summary
+
 def R(k, v):
     RES[k] = v
     return v
@@ -1881,11 +1834,11 @@ R("w6_share", dict(W6_SHARE))
 R("n_personwaves", int(SAMPLE.sum()))
 R("sample", dict(SAMPLE))
 R("or_D1_pooled", {s: tuple(OR_POOLED[(OR_POOLED.sex_id == s) & (OR_POOLED["def"] == "D1")].iloc[0][["or_10y", "lo", "hi"]]) for s in (1, 2, 3)})
-# GBD ratio per 10 years averaged over the six matched years, UI from the draws averaged the same way
+
 R("gslope_568", {s: (GSLOPE[(GSLOPE.cause_id == 568) & (GSLOPE.sex_id == s)].ratio_10y.mean(),
                      *pci(np.mean([GSLOPE_DRAWS[(568, w, s)] for w in WAVES], axis=0))) for s in (1, 2, 3)})
 
-# ============================================================================= 11. Legends
+
 def pct(x, k=1):
     return f"{100 * x:.{k}f}%"
 
@@ -1920,7 +1873,7 @@ tipD1, tipD2, tipD3 = RES["tip_D1_568"], RES["tip_D2_568"], RES["tip_D3_568"]
 share_txt = ", ".join(f"{int(y)}: {100*s:.0f}%" for y, s in W6_SHARE.items())
 LEG = f"""# Figure Legends — Depression among adults aged 50 years or older in China: age structure, trends and population scale in GBD 2023 versus CHARLS 2011–2023
 
-> Nature Medicine-style figure legends generated by `code/01_run_analysis.py`. Abbreviations: **ASR** age-standardized rate (standard: GBD China {STD_YEAR}, both sexes, ages 50–54 to 85+ in eight 5-year groups); **CES-D-10** 10-item Center for Epidemiologic Studies Depression scale (0–30); **CHARLS** China Health and Retirement Longitudinal Study; **CI** confidence interval; **GBD** Global Burden of Disease Study 2023 (IHME); **MDD** major depressive disorder; **PR** prevalence ratio; **PSU** primary sampling unit; **UI** uncertainty interval; **WPP** United Nations World Population Prospects 2024. Data: {DATA_VERSION}. CHARLS estimates use the cross-sectional individual weight with household and individual non-response adjustment; standard errors use Taylor linearization with communities as PSUs ({N_PSU.min()}–{N_PSU.max()} PSUs per wave). CHARLS analytic sample: respondents aged ≥50 years with all ten CES-D-10 items and a weight ({', '.join(f'{WLAB[w]}: {int(SAMPLE[w]):,}' for w in WAVES)}; {RES['n_personwaves']:,} person-waves). Case definitions (design §5.1): D1 CES-D-10 ≥10; D2 ≥12; D3 ≥15; D4 ≥10 in two consecutive waves; D5 ≥10 with any ADL limitation; D6 self-reported doctor diagnosis of emotional, nervous or psychiatric problems; D7 ≥10 without such a diagnosis. GBD prevalence is point prevalence from the GBD 2023 results tool; its UIs for aggregated groups and ASRs are approximated by Monte Carlo sampling of age-specific UIs assuming independence between age groups ({NDRAW:,} draws). **Intervals.** Every CHARLS estimate carries a 95% CI: age–sex-specific prevalences, ASRs (including the sensitivity-analysis ASRs), prevalence ratios and their changes use Taylor linearization with communities as PSUs (the ASR is linearized as one standardized sum, so the covariance between age groups sampled from the same communities is retained); estimates pooled across waves (prevalence ratios, female-to-male ratios, odds ratios) are linearized jointly across waves, because the waves share the same communities and many respondents; counts of persons, projections, the decomposition and the tipping-point curves use a design-based bootstrap ({NBOOT:,} replicates resampling communities with replacement within each wave, Rao–Wu rescaling, all age–sex-specific prevalences and every derived quantity recomputed per replicate, 2.5th–97.5th percentiles); where a quantity combines CHARLS and GBD, the bootstrap replicates are paired with the GBD draws, treating the two sources as independent; populations are held fixed. The bootstrap SE of the D1 ASR was {RES['asr_boot_ratio'][0]:.2f}–{RES['asr_boot_ratio'][1]:.2f} times the linearized Taylor SE across waves, confirming the two approaches agree (`qc/asr_se_taylor_vs_bootstrap.csv`; a formula treating age cells as independent would understate the SE by about {100*(1-1/RES['asr_indep_ratio'][0]):.0f}–{100*(1-1/RES['asr_indep_ratio'][1]):.0f}%). The 2021–2023 CHARLS wave is compared with the mixture of GBD 2021–2023 weighted by the CHARLS interview-year distribution ({share_txt}) and plotted at {W6_YEAR:.1f}. Colours: CHARLS definitions in blues/teal (D1 light blue, D2 mid blue, D3 dark blue, D4 purple, D5 teal); GBD MDD red dashed; GBD depressive disorders orange dotted. CES-D-10 is a symptom scale; levels are not clinical prevalence and are compared only for structure and trend unless stated. Source data for each figure are in `07_SourceData/<Figure>_SourceData.xlsx` (and `.csv`); panels a, b, c… correspond to worksheets of the same name.
+> Abbreviations: **ASR** age-standardized rate (standard: GBD China {STD_YEAR}, both sexes, ages 50–54 to 85+ in eight 5-year groups); **CES-D-10** 10-item Center for Epidemiologic Studies Depression scale (0–30); **CHARLS** China Health and Retirement Longitudinal Study; **CI** confidence interval; **GBD** Global Burden of Disease Study 2023 (IHME); **MDD** major depressive disorder; **PR** prevalence ratio; **PSU** primary sampling unit; **UI** uncertainty interval; **WPP** United Nations World Population Prospects 2024. Data: {DATA_VERSION}. CHARLS estimates use the cross-sectional individual weight with household and individual non-response adjustment; standard errors use Taylor linearization with communities as PSUs ({N_PSU.min()}–{N_PSU.max()} PSUs per wave). CHARLS analytic sample: respondents aged ≥50 years with all ten CES-D-10 items and a weight ({', '.join(f'{WLAB[w]}: {int(SAMPLE[w]):,}' for w in WAVES)}; {RES['n_personwaves']:,} person-waves). Case definitions: D1 CES-D-10 ≥10; D2 ≥12; D3 ≥15; D4 ≥10 in two consecutive waves; D5 ≥10 with any ADL limitation; D6 self-reported doctor diagnosis of emotional, nervous or psychiatric problems; D7 ≥10 without such a diagnosis. GBD prevalence is point prevalence from the GBD 2023 results tool; its UIs for aggregated groups and ASRs are approximated by Monte Carlo sampling of age-specific UIs assuming independence between age groups ({NDRAW:,} draws). **Intervals.** Every CHARLS estimate carries a 95% CI: age–sex-specific prevalences, ASRs (including the sensitivity-analysis ASRs), prevalence ratios and their changes use Taylor linearization with communities as PSUs (the ASR is linearized as one standardized sum, so the covariance between age groups sampled from the same communities is retained); estimates pooled across waves (prevalence ratios, female-to-male ratios, odds ratios) are linearized jointly across waves, because the waves share the same communities and many respondents; counts of persons, projections, the decomposition and the tipping-point curves use a design-based bootstrap ({NBOOT:,} replicates resampling communities with replacement within each wave, Rao–Wu rescaling, all age–sex-specific prevalences and every derived quantity recomputed per replicate, 2.5th–97.5th percentiles); where a quantity combines CHARLS and GBD, the bootstrap replicates are paired with the GBD draws, treating the two sources as independent; populations are held fixed. The bootstrap SE of the D1 ASR was {RES['asr_boot_ratio'][0]:.2f}–{RES['asr_boot_ratio'][1]:.2f} times the linearized Taylor SE across waves, confirming the two approaches agree (`qc/asr_se_taylor_vs_bootstrap.csv`; a formula treating age cells as independent would understate the SE by about {100*(1-1/RES['asr_indep_ratio'][0]):.0f}–{100*(1-1/RES['asr_indep_ratio'][1]):.0f}%). The 2021–2023 CHARLS wave is compared with the mixture of GBD 2021–2023 weighted by the CHARLS interview-year distribution ({share_txt}) and plotted at {W6_YEAR:.1f}. Colours: CHARLS definitions in blues/teal (D1 light blue, D2 mid blue, D3 dark blue, D4 purple, D5 teal); GBD MDD red dashed; GBD depressive disorders orange dotted. CES-D-10 is a symptom scale; levels are not clinical prevalence and are compared only for structure and trend unless stated. Source data for each figure are in `07_SourceData/<Figure>_SourceData.xlsx` (and `.csv`); panels a, b, c… correspond to worksheets of the same name.
 
 ---
 
@@ -1974,7 +1927,7 @@ Observed period (grey): CHARLS age- and sex-specific prevalence applied to the G
 
 **a**–**c**, D1 (**a**), D2 (**b**) and D3 (**c**), adults aged ≥50 years, both sexes, CHARLS 2021–2023 versus GBD 2021–2023 (crude). Curves (dashed, MDD; dotted, depressive disorders) solve the Rogan–Gladen relation π = (p + Sp − 1)/(Se + Sp − 1) for the specificity required at each sensitivity so that the corrected prevalence π equals the GBD MDD (red) or depressive-disorder (orange) prevalence; shaded bands are 95% intervals obtained by pairing the PSU-bootstrap replicates of the CHARLS apparent prevalence p with the GBD UI draws of π; the grey line marks Se + Sp = 1 (a test no better than chance) and the grey triangle below it (Se + Sp < 1) is uninformative. Panel titles give the apparent prevalence with its 95% CI. The circle in **b** is the only published accuracy estimate of the Chinese CES-D-10 against a clinical diagnosis at a matching threshold: ≥12, sensitivity 0.76 and specificity 0.55 against psychiatrist diagnosis across the spectrum of depressive disorders, in 398 Hong Kong adults aged ≥60 years referred for psychiatric assessment (Cheng & Chan 2005); it is shown for context, because its referral setting and diagnostic target differ from the community MDD comparison. No eligible reference estimate was identified for thresholds 10 (**a**) or 15 (**c**).
 
-**Note.** With apparent prevalence {pct(tipD1[0])} (95% CI {pct(tipD1[5])}–{pct(tipD1[6])}) for D1 against GBD MDD {pct(tipD1[1], 2)} (UI {pct(tipD1[7], 2)}–{pct(tipD1[8], 2)}), equality at a sensitivity of 0.90 would require a specificity of {tipD1[2]:.3f} ({tipD1[3]:.3f}–{tipD1[4]:.3f}); for D2 ({pct(tipD2[0])}, {pct(tipD2[5])}–{pct(tipD2[6])}) {tipD2[2]:.3f} ({tipD2[3]:.3f}–{tipD2[4]:.3f}) and for D3 ({pct(tipD3[0])}, {pct(tipD3[5])}–{pct(tipD3[6])}) {tipD3[2]:.3f} ({tipD3[3]:.3f}–{tipD3[4]:.3f}). At the Hong Kong estimate the Rogan–Gladen corrected D2 prevalence would fall below zero, because the apparent prevalence ({pct(tipD2[0])}) is lower than the false-positive rate implied by Sp = 0.55 (45%); that is, accuracy measured in a referred clinical sample, where non-cases carry many symptoms, does not transfer to a community sample. A literature search (PubMed and web, November 2026) identified no eligible validation study of CES-D-10 against a structured diagnostic interview in community-dwelling mainland Chinese adults aged ≥45 or ≥50 years, so no Bayesian Rogan–Gladen correction was fitted (design §7 D); the figure therefore bounds, rather than estimates, the level difference. Source data: `Fig6_SourceData.xlsx` (sheets a–c; sheet lit, literature point).
+**Note.** With apparent prevalence {pct(tipD1[0])} (95% CI {pct(tipD1[5])}–{pct(tipD1[6])}) for D1 against GBD MDD {pct(tipD1[1], 2)} (UI {pct(tipD1[7], 2)}–{pct(tipD1[8], 2)}), equality at a sensitivity of 0.90 would require a specificity of {tipD1[2]:.3f} ({tipD1[3]:.3f}–{tipD1[4]:.3f}); for D2 ({pct(tipD2[0])}, {pct(tipD2[5])}–{pct(tipD2[6])}) {tipD2[2]:.3f} ({tipD2[3]:.3f}–{tipD2[4]:.3f}) and for D3 ({pct(tipD3[0])}, {pct(tipD3[5])}–{pct(tipD3[6])}) {tipD3[2]:.3f} ({tipD3[3]:.3f}–{tipD3[4]:.3f}). At the Hong Kong estimate the Rogan–Gladen corrected D2 prevalence would fall below zero, because the apparent prevalence ({pct(tipD2[0])}) is lower than the false-positive rate implied by Sp = 0.55 (45%); that is, accuracy measured in a referred clinical sample, where non-cases carry many symptoms, does not transfer to a community sample. A literature search (PubMed and web, November 2026) identified no eligible validation study of CES-D-10 against a structured diagnostic interview in community-dwelling mainland Chinese adults aged ≥45 or ≥50 years, so no Bayesian Rogan–Gladen correction was fitted; the figure therefore bounds, rather than estimates, the level difference. Source data: `Fig6_SourceData.xlsx` (sheets a–c; sheet lit, literature point).
 
 ---
 
@@ -1996,7 +1949,7 @@ Observed period (grey): CHARLS age- and sex-specific prevalence applied to the G
 ## Supplementary Fig. 4 | Proportion with an item score ≥2 after reverse-scoring, by CES-D-10 item and age group, CHARLS 2011–2023 pooled.
 *File:* `SuppFig4_item_endorsement_by_age.pdf` · *Source data:* `SuppFig4_SourceData.xlsx`
 
-**a**–**j**, One panel per item; somatic items (trouble keeping mind on tasks, everything an effort, restless sleep, could not get going) in orange, affective items in blue. For the eight negatively worded items a score ≥2 means the symptom on ≥3 days of the past week; for the two positively worded items (hopeful, happy) it means hopefulness or happiness on ≤2 days. Waves are weighted equally. Used to judge whether the age gradient is driven by somatic items (design §7 C3).
+**a**–**j**, One panel per item; somatic items (trouble keeping mind on tasks, everything an effort, restless sleep, could not get going) in orange, affective items in blue. For the eight negatively worded items a score ≥2 means the symptom on ≥3 days of the past week; for the two positively worded items (hopeful, happy) it means hopefulness or happiness on ≤2 days. Waves are weighted equally. Used to judge whether the age gradient is driven by somatic items.
 
 ## Supplementary Fig. 5 | Age-specific prevalence of the persistence, functional-limitation, diagnosis and unrecognized definitions (D4–D7) by sex, CHARLS 2018, 2020 and 2021–2023.
 *File:* `SuppFig5_other_definitions_by_age.pdf` · *Source data:* `SuppFig5_SourceData.xlsx`
@@ -2015,9 +1968,9 @@ Observed period (grey): CHARLS age- and sex-specific prevalence applied to the G
 
 **a**, Bars give the percentage change in persons aged 50–59, 60–74 and ≥75 years between the 2023 count (GBD 2023 population) and the 2035 count (WPP 2024 medium variant); error bars are 95% intervals (CHARLS: PSU bootstrap of the rates, with the trend refitted in each replicate; GBD: UI draws; populations fixed).
 """
-(V1 / "03_Figure_Legends.md").write_text(LEG, encoding="utf-8")
+(ANALYSIS_DIR / "03_Figure_Legends.md").write_text(LEG, encoding="utf-8")
 
-# ============================================================================= 12. Results summary (numbers from this run)
+
 def mi(x):
     return f"{x / 1e6:,.1f} million"
 
@@ -2040,31 +1993,31 @@ SUM = f"""# Results summary (generated)
 > **CHARLS intervals**: cell prevalences, ASRs (including sensitivity-analysis ASRs), prevalence ratios and their changes use Taylor linearization (communities as PSUs; the ASR is linearized as one standardized sum, keeping the covariance between age cells in the same community; treating age cells as independent would understate the SE by about {100*(1-1/RES['asr_indep_ratio'][0]):.0f}–{100*(1-1/RES['asr_indep_ratio'][1]):.0f}%). **Estimates pooled across waves** (prevalence ratios, female-to-male ratios, ORs) are linearized jointly across waves, accounting for the communities and respondents shared between waves (the SE of the pooled PR is about {100*RES['pool_se_ratio'][0]:.0f}–{100*RES['pool_se_ratio'][1]:.0f}% larger than with independent waves). Counts, projections, the three-factor decomposition and the tipping-point curves use a **design-based bootstrap** ({NBOOT:,} replicates resampling communities with replacement within each wave, Rao–Wu rescaling, every age–sex prevalence and derived quantity recomputed, 2.5th–97.5th percentiles). **GBD intervals**: lognormal Monte Carlo of the age–sex cell UIs ({NDRAW:,} draws, age groups assumed independent). Quantities combining both sources (ratios, differences, CHARLS/GBD ratios) pair bootstrap replicates with GBD draws, treating the sources as independent; populations are fixed. The bootstrap SE of the D1 ASR is {RES['asr_boot_ratio'][0]:.2f}–{RES['asr_boot_ratio'][1]:.2f} times the linearized Taylor SE (`qc/asr_se_taylor_vs_bootstrap.csv`).
 > Standard population: GBD China {STD_YEAR}, ages ≥50 years (eight 5-year groups, both sexes). The sixth CHARLS wave is compared with the GBD 2021–2023 mixture weighted by interview year ({share_txt}).
 
-## 1. Sample (Table 1)
+## Sample (Table 1)
 
 - Respondents aged ≥50 years with all ten CES-D-10 items and a weight: {', '.join(f'{WLAB[w]}: {int(SAMPLE[w]):,}' for w in WAVES)}; {RES['n_personwaves']:,} person-waves in total.
 - D1 (CES-D-10 ≥10) ASR in 2021–2023: {pct(RES['asr_2026_D1'])} ({pct(asr_row('CHARLS', 'D1', 2026, 3).lo)}–{pct(asr_row('CHARLS', 'D1', 2026, 3).hi)}); GBD MDD {pct(RES['asr_2026_568'], 2)} ({pct(asr_row('GBD', 568, 2026, 3).lo, 2)}–{pct(asr_row('GBD', 568, 2026, 3).hi, 2)}); GBD depressive disorders {pct(RES['asr_2026_567'], 2)} ({pct(asr_row('GBD', 567, 2026, 3).lo, 2)}–{pct(asr_row('GBD', 567, 2026, 3).hi, 2)}). The constructs differ, so the levels are not compared directly.
 - Table 1 gives the crude prevalence of D1–D7 and the mean CES-D-10 score with 95% CIs (descriptive sample characteristics are point estimates).
 
-## 2. Age structure (Fig. 1, Supp Fig. 1 and 3, Supp Table 5)
+## Age structure (Fig. 1, Supp Fig. 1 and 3, Supp Table 5)
 
 - CHARLS D1 prevalence ratio, ≥75 vs 50–59 years (pooled over six waves): both sexes {pr1[0]:.2f} (95% CI {pr1[1]:.2f}–{pr1[2]:.2f}), men {prm[0]:.2f} ({prm[1]:.2f}–{prm[2]:.2f}), women {prf[0]:.2f} ({prf[1]:.2f}–{prf[2]:.2f}). D3 (≥15): {pr3[0]:.2f} ({pr3[1]:.2f}–{pr3[2]:.2f}).
 - The same ratio in GBD: MDD {pr1[3]:.2f} (UI {pr1[5]:.2f}–{pr1[6]:.2f}), depressive disorders {pr1[4]:.2f} ({pr1[7]:.2f}–{pr1[8]:.2f}) (mean over the matched years).
 - With the six non-somatic items (score ≥6) the ratio is {prns[0]:.2f} ({prns[1]:.2f}–{prns[2]:.2f}).
 - Survey-weighted logistic regression, D1 OR per 10 years of age (pooled over six waves): both sexes {RES['or_D1_pooled'][3][0]:.2f} ({RES['or_D1_pooled'][3][1]:.2f}–{RES['or_D1_pooled'][3][2]:.2f}), men {RES['or_D1_pooled'][1][0]:.2f} ({RES['or_D1_pooled'][1][1]:.2f}–{RES['or_D1_pooled'][1][2]:.2f}), women {RES['or_D1_pooled'][2][0]:.2f} ({RES['or_D1_pooled'][2][1]:.2f}–{RES['or_D1_pooled'][2][2]:.2f}); GBD MDD prevalence ratio per 10 years {RES['gslope_568'][3][0]:.3f} (UI {RES['gslope_568'][3][1]:.3f}–{RES['gslope_568'][3][2]:.3f}).
 
-## 3. Sex ratio (Fig. 2, Supp Table 7)
+## Sex ratio (Fig. 2, Supp Table 7)
 
 - CHARLS D1 female-to-male ratio (pooled over six waves): all ages ≥50 {srall[0]:.2f} ({srall[1]:.2f}–{srall[2]:.2f}), 50–54 years {sr45[0]:.2f} ({sr45[1]:.2f}–{sr45[2]:.2f}), ≥85 years {sr85[0]:.2f} ({sr85[1]:.2f}–{sr85[2]:.2f}).
 - GBD MDD female-to-male ratio across age groups: {gsr[0]:.2f}–{gsr[1]:.2f}.
 
-## 4. Time trend (Fig. 3, Supp Table 9)
+## Time trend (Fig. 3, Supp Table 9)
 
 - ASR 2011 → 2021–2023: CHARLS D1 {pct(t1[0])} → {pct(t1[1])} ({100*t1[2]:+.1f}%, CI {100*t1[3]:+.1f} to {100*t1[4]:+.1f}); D3 {pct(t3[0])} → {pct(t3[1])} ({100*t3[2]:+.1f}%, CI {100*t3[3]:+.1f} to {100*t3[4]:+.1f}); D2 {100*RES['trend_D2'][2]:+.1f}% ({100*RES['trend_D2'][3]:+.1f} to {100*RES['trend_D2'][4]:+.1f}); D5 {100*RES['trend_D5'][2]:+.1f}% ({100*RES['trend_D5'][3]:+.1f} to {100*RES['trend_D5'][4]:+.1f}).
 - GBD MDD {pct(t568[0], 2)} → {pct(t568[1], 2)} ({100*t568[2]:+.1f}%, UI {100*t568[3]:+.1f} to {100*t568[4]:+.1f}); GBD depressive disorders {pct(t567[0], 2)} → {pct(t567[1], 2)} ({100*t567[2]:+.1f}%, UI {100*t567[3]:+.1f} to {100*t567[4]:+.1f}).
 - 2018 → 2020: CHARLS D1 {100*RES['trend1820_D1'][0]:+.1f}% (CI {100*RES['trend1820_D1'][1]:+.1f} to {100*RES['trend1820_D1'][2]:+.1f}); GBD MDD {100*RES['trend1820_568'][0]:+.1f}% (UI {100*RES['trend1820_568'][1]:+.1f} to {100*RES['trend1820_568'][2]:+.1f}).
 
-## 5. Population size and ageing (Fig. 4–5, Table 3, Supp Table 11 and 12)
+## Population size and ageing (Fig. 4–5, Table 3, Supp Table 11 and 12)
 
 - Population aged ≥50 years: {RES['pop45_2011']/1e6:,.1f} million in 2011 (GBD), {RES['pop45_2023']/1e6:,.1f} million in 2023 (GBD), {RES['pop45_2035']/1e6:,.1f} million in 2035 (WPP 2024 medium variant); share aged ≥60 years {pct(RES['pop60_share_2023'], 0)} → {pct(RES['pop60_share_2035'], 0)}.
 - Numbers in 2023 (CHARLS = 2021–2023 age–sex-specific rates × GBD 2023 population; the 2021.4 point in Fig. 4 uses the mixture-year population, 4% lower): GBD MDD {mici('n2023_568')}, GBD depressive disorders {mici('n2023_567')}; CHARLS D1 {mici('n2023_D1')}, D2 {mici('n2023_D2')}, D3 {mici('n2023_D3')}, D5 {mici('n2023_D5')}, D7 (positive without diagnosis) {mici('n2023_D7')}. Ratio of CHARLS to GBD MDD counts: D1 {RES['ratio2023_D1'][0]:.1f} ({RES['ratio2023_D1'][1]:.1f}–{RES['ratio2023_D1'][2]:.1f}), D2 {RES['ratio2023_D2'][0]:.1f} ({RES['ratio2023_D2'][1]:.1f}–{RES['ratio2023_D2'][2]:.1f}), D3 {RES['ratio2023_D3'][0]:.1f} ({RES['ratio2023_D3'][1]:.1f}–{RES['ratio2023_D3'][2]:.1f}), D5 {RES['ratio2023_D5'][0]:.1f} ({RES['ratio2023_D5'][1]:.1f}–{RES['ratio2023_D5'][2]:.1f}).
@@ -2072,12 +2025,12 @@ SUM = f"""# Results summary (generated)
 - 2023→2035 (constant rates; change and ageing share computed within the WPP series, as in Fig. 5b): GBD MDD {mici('n2023_568')} → {mici('n2035_568')} ({RES['chg2335_568'][0]:+.1f}%, {RES['chg2335_568'][1]:+.1f} to {RES['chg2335_568'][2]:+.1f}), ageing share {sh_(e568, 3)}; CHARLS D1 {mici('n2023_D1')} → {mici('n2035_D1')} ({RES['chg2335_D1'][0]:+.1f}%, {RES['chg2335_D1'][1]:+.1f} to {RES['chg2335_D1'][2]:+.1f}), ageing share {sh_(eD1, 3)}; D2 ageing share {sh_(RES['dec2335_D2'], 3)}; D3 {mici('n2023_D3')} → {mici('n2035_D3')}, ageing share {sh_(eD3, 3)}; D5 ageing share {sh_(RES['dec2335_D5'], 3)}.
 - Trend-continued scenario, 2035 (upper bound): D1 {mi(RES['tr2035_D1'][0])} ({mi(RES['tr2035_D1'][1])} to {mi(RES['tr2035_D1'][2])}), D3 {mi(RES['tr2035_D3'][0])} ({mi(RES['tr2035_D3'][1])} to {mi(RES['tr2035_D3'][2])}).
 
-## 6. Level of prevalence: tipping point (Fig. 6)
+## Level of prevalence: tipping point (Fig. 6)
 
 - CHARLS 2021–2023 D1 crude prevalence {pct(tipD1[0])} ({pct(tipD1[5])}–{pct(tipD1[6])}); GBD MDD crude prevalence {pct(tipD1[1], 2)} (UI {pct(tipD1[7], 2)}–{pct(tipD1[8], 2)}). At a sensitivity of 0.90, the Rogan–Gladen corrected prevalence equals GBD MDD if the specificity is {tipD1[2]:.3f} ({tipD1[3]:.3f}–{tipD1[4]:.3f}) for D1, {tipD2[2]:.3f} ({tipD2[3]:.3f}–{tipD2[4]:.3f}) for D2 and {tipD3[2]:.3f} ({tipD3[3]:.3f}–{tipD3[4]:.3f}) for D3. Intervals pair CHARLS bootstrap replicates with GBD draws.
 - No validation study of the CES-D-10 against a structured diagnostic interview in community-dwelling mainland Chinese adults aged ≥50 years was identified to place a measured point on these curves.
 
-## 7. Sensitivity analyses (Supp Table 10, Supp Fig. 6)
+## Sensitivity analyses (Supp Table 10, Supp Fig. 6)
 
 - **Item set (eight negatively worded items, excluding the reverse-scored "hopeful" and "happy")**: change 2011→2013, ten items {trci('tr_D1_2011_2013')}, eight items {trci('tr_D8neg_2011_2013')}; 2013→2015 {trci('tr_D1_2013_2015')} and {trci('tr_D8neg_2013_2015')}; 2011→2021–2023 {trci('tr_D1_2011_2021–2023')} and {trci('tr_D8neg_2011_2021–2023')}; 2018→2020 {trci('tr_D1_2018_2020')} and {trci('tr_D8neg_2018_2020')}.
 - Age gradient (≥75 vs 50–59, pooled over six waves): ten items {RES['grad_D1'][0]:.2f} ({RES['grad_D1'][1]:.2f}–{RES['grad_D1'][2]:.2f}), eight negative items {RES['grad_D8neg'][0]:.2f} ({RES['grad_D8neg'][1]:.2f}–{RES['grad_D8neg'][2]:.2f}), six non-somatic items {RES['grad_D6ns'][0]:.2f} ({RES['grad_D6ns'][1]:.2f}–{RES['grad_D6ns'][2]:.2f}).
@@ -2085,13 +2038,13 @@ SUM = f"""# Results summary (generated)
 
 {SENS.to_markdown(index=False)}
 
-## 8. Quality control
+## Quality control
 
 - {len(QC_ROWS)} checks; see `code/qc/qc_checks.csv`.
 """
-(V1 / "08_Results_summary.md").write_text(SUM, encoding="utf-8")
+(ANALYSIS_DIR / "08_Results_summary.md").write_text(SUM, encoding="utf-8")
 
-# ============================================================================= 13. QC output
+
 qc_df = pd.DataFrame(QC_ROWS)
 qc_df.to_csv(QC / "qc_checks.csv", index=False, encoding="utf-8-sig")
 EST.to_csv(QC / "charls_estimates_long.csv", index=False)

@@ -1,13 +1,10 @@
 #!/usr/bin/env python3
-"""CHARLS 2011–2023 mental-health data: sample-derivation flow diagram and data-quality report (for MDD+Charle/CHARLS/).
+"""Generate the CHARLS sample flow diagram and data-quality summaries.
 
-Run:    python3 04_charls_flow_diagram.py      (after 00_build_charls_panel.py and 03_export_charls_folder.py)
-Input:  ../../data/processed/charls_panel_2011_2023.csv, ./qc/panel_build_log.csv
-Output: ../../../CHARLS/07_CHARLS_data_flow.pdf / .png        flow diagram (Nature Medicine style, Helvetica, 300 dpi)
-        ../../../CHARLS/07_CHARLS_data_flow_counts.csv        the numbers shown in the diagram
-        ../../../CHARLS/08_data_quality_by_wave.csv            missingness, ranges, duplicates, weights per wave
-        ../../../CHARLS/09_panel_participation.csv             waves per person, consecutive-wave pairs (basis of D4)
-"""
+Inputs: data/processed/charls_panel_2011_2023.csv and
+analysis/code/qc/panel_build_log.csv.
+Outputs under output/CHARLS/: PDF and PNG flow diagrams, sample counts,
+wave-specific data quality and panel participation tables."""
 
 from pathlib import Path
 
@@ -20,10 +17,10 @@ import pandas as pd
 from matplotlib.patches import FancyBboxPatch
 
 HERE = Path(__file__).resolve().parent
-MS = HERE.parent.parent
-OUT = MS / "output" / "CHARLS"
+REPO_ROOT = HERE.parent.parent
+OUT = REPO_ROOT / "output" / "CHARLS"
 OUT.mkdir(exist_ok=True)
-PANEL = MS / "data" / "processed" / "charls_panel_2011_2023.csv"
+PANEL = REPO_ROOT / "data" / "processed" / "charls_panel_2011_2023.csv"
 LOG = pd.read_csv(HERE / "qc" / "panel_build_log.csv")
 
 WAVES = [2011, 2013, 2015, 2018, 2020, 2026]
@@ -33,7 +30,7 @@ plt.rcParams.update({"font.family": ["Helvetica", "Arial", "DejaVu Sans"], "font
 
 P = pd.read_csv(PANEL, low_memory=False)
 
-# ----------------------------------------------------------------------------- step counts per wave
+
 rows = []
 for w in WAVES:
     d = P[P.wave == w]
@@ -70,7 +67,7 @@ pairs["wave"] = pairs.wave.map(WLAB)
 PART.to_csv(OUT / "09_panel_participation.csv", index=False, encoding="utf-8-sig")
 pairs.to_csv(OUT / "09_panel_participation.csv", index=False, mode="a", encoding="utf-8-sig")
 
-# ----------------------------------------------------------------------------- data-quality report
+
 DQ = []
 for w in WAVES:
     d = P[P.wave == w]
@@ -91,7 +88,7 @@ for w in WAVES:
     })
 pd.DataFrame(DQ).to_csv(OUT / "08_data_quality_by_wave.csv", index=False, encoding="utf-8-sig")
 
-# ----------------------------------------------------------------------------- flow diagram
+
 import textwrap
 
 fig, ax = plt.subplots(figsize=(7.6, 8.8))
@@ -99,8 +96,8 @@ ax.set_xlim(0, 100)
 ax.set_ylim(0, 114)
 ax.axis("off")
 DARK, RED, BLUE_FC, BLUE_EC, GREY = "#444444", "#8B1A1A", "#E6EEF7", "#2171B5", "#F4F4F4"
-LX, LW = 2, 30                         # label column
-XCOL = np.linspace(38.5, 94.5, 6)      # column centres for the six waves
+LX, LW = 2, 30
+XCOL = np.linspace(38.5, 94.5, 6)
 X0, W = 2, 96
 
 
@@ -122,7 +119,6 @@ def arrows(y0, y1):
         ax.annotate("", xy=(x, y1), xytext=(x, y0), arrowprops=dict(arrowstyle="-|>", lw=0.7, color=DARK, shrinkA=0, shrinkB=0, mutation_scale=7))
 
 
-# header
 y = 112
 ax.text(LX + 1.2, y, "CHARLS wave", ha="left", va="center", fontsize=7.3, fontweight="bold")
 for x, w in zip(XCOL, WAVES):
@@ -135,7 +131,7 @@ for dy, lab, vals in [(3.0, "CES-D-10 items", [CESD_VARS[w] for w in WAVES]),
         ax.text(x, y - dy, v, ha="center", va="center", fontsize=6.2, color=DARK)
 ax.plot([X0, X0 + W], [y - 10.6, y - 10.6], color=DARK, lw=0.8)
 
-# rows
+
 y = 93.5
 row_box(y, 6.5, "Respondents in the demographic file (one row per person)", FLOW.respondents, sup="ᵃ")
 arrows(y, y - 5.2)
@@ -160,7 +156,7 @@ row_text(y - 2.4, "Communities (PSUs)", FLOW.psu_analytic, color=DARK, fs=6.2, f
 row_text(y - 4.8, "Weighted population ≥50 y (millions)", FLOW.weighted_population_50plus_millions, color=DARK, fs=6.2, fmt=lambda n: f"{n:.1f}")
 row_text(y - 7.2, "With a previous wave (basis of D4)", [0] + list(FLOW.d4_defined[1:]), color=DARK, fs=6.2, fmt=lambda n: f"{int(n):,}" if n else "—")
 
-# pooled box
+
 y -= 11.5
 ax.add_patch(FancyBboxPatch((X0, y - 11.5), W, 11.5, boxstyle="round,pad=0.25,rounding_size=0.7", fc=GREY, ec="#666666", lw=0.9))
 ax.text(LX + 1.2, y - 1.6, f"Pooled analytic data: {n_pw:,} person-waves from {n_persons:,} persons", ha="left", va="top", fontsize=7.2, fontweight="bold")
@@ -169,7 +165,7 @@ ax.text(LX + 1.2, y - 4.6, "Number of waves per person (1–6): " + part_txt, ha
 ax.text(LX + 1.2, y - 7.2, textwrap.fill("Derived variables: CES-D-10 score and six non-somatic items; case definitions D1–D7; ever doctor-diagnosed emotional/psychiatric problem; ADL limitation; self-rated health; hukou; interview year", 150),
         ha="left", va="top", fontsize=6.0, color=DARK, linespacing=1.2)
 
-# footnotes
+
 y -= 14.5
 foot = [
     "ᵃ Wave 6 (2021–2023) was fielded over three years: 19,197 records in the 2021/2022/2023 files → 18,133 after keeping each person's response-year record. 2011 IDs converted to 12 digits.",
