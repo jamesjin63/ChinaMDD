@@ -42,13 +42,13 @@ python3 04_charls_flow_diagram.py     # optional: flow diagram -> output/CHARLS/
 
 | Folder (under `analysis/`) | Content |
 |---|---|
-| `02_主图_Figures/` | main figures (PNG 300 dpi and PDF) |
-| `03_图注_Figure_Legends.md` | figure legends with the numbers filled in |
-| `04_主表_Tables/` | main tables (CSV, Markdown; DOCX from `02_build_tables_docx.py`) |
-| `05_附图_Supplementary_Figures/` | supplementary figures |
-| `06_附表_Supplementary_Tables/` | supplementary tables (CSV and one workbook) |
-| `07_源数据_SourceData/` | source data for every figure (one workbook per figure, one sheet per panel) |
-| `08_结果摘要_Results_summary.md` | results summary |
+| `02_Figures/` | main figures (PNG 300 dpi and PDF) |
+| `03_Figure_Legends.md` | figure legends with the numbers filled in |
+| `04_Tables/` | main tables (CSV, Markdown; DOCX from `02_build_tables_docx.py`) |
+| `05_Supplementary_Figures/` | supplementary figures |
+| `06_Supplementary_Tables/` | supplementary tables (CSV and one workbook) |
+| `07_SourceData/` | source data for every figure (one workbook per figure, one sheet per panel) |
+| `08_Results_summary.md` | results summary |
 | `code/qc/` | quality-control checks |
 
 Random draws use a fixed seed, so the outputs are reproducible.

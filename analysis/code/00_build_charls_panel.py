@@ -7,7 +7,6 @@ Output: ../../data/processed/charls_panel_2011_2023.csv   (one row per person-wa
         ../../data/processed/charls_panel_README.md        (variable crosswalk, written from the code constants)
         ./qc/panel_build_log.csv                           (row counts at each step)
 
-Design: ../../../研究设计_v0.2_GBD与CHARLS中国中老年精神障碍估计偏差评估.md  (§5.1 case definitions, §6.2 variables)
 Rules:  CES-D items are aligned by item content, never by variable name (the numbering changed in 2020 and W6).
         Each item 1–4 is recoded 0–3; items 5 (hopeful) and 8 (happy) are reverse-scored; the score is the sum of 10
         items and is missing if any item is missing (sensitivity: ≤2 missing items prorated).
@@ -383,7 +382,7 @@ for w in (2011, 2013, 2015, 2018, 2020, 2026):
 cw = pd.DataFrame(rows)
 cw.to_csv(OUT / "charls_variable_crosswalk.csv", index=False)
 md = ["# CHARLS 2011–2023 person-wave panel (MS1 V1)", "",
-      "Built by `V1/09_代码与质控_Code_QC/00_build_charls_panel.py`. One row per person-wave; 2011 IDs converted to 12 digits.", "",
+      "Built by `analysis/code/00_build_charls_panel.py`. One row per person-wave; 2011 IDs converted to 12 digits.", "",
       "## Variable crosswalk", "", cw.to_markdown(index=False), "",
       "## Derived variables", "",
       "| Column | Definition |", "|---|---|",

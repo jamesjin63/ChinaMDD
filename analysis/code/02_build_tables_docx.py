@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build Nature Medicine-style three-line DOCX tables from V1/04_主表_Tables/*.csv (adapted from CancerToday/MS2/V1) and verify them.
+"""Build Nature Medicine-style three-line DOCX tables from analysis/04_Tables/*.csv and verify them.
 
 Run after 01_run_analysis.py:  python3 02_build_tables_docx.py
 The CSV is the single source: cells are read as display strings and written verbatim.
@@ -20,7 +20,7 @@ from docx.oxml.ns import qn
 from docx.shared import Pt, Twips
 
 OUT = Path(__file__).resolve().parent
-MAIN = OUT.parent / "04_主表_Tables"  # CSV source and DOCX output live together
+MAIN = OUT.parent / "04_Tables"  # CSV source and DOCX output live together
 DOCX_DIR = MAIN
 
 PAGE_W, PAGE_H, MARGIN = 16838, 11906, 720  # A4 landscape, 0.5 inch margins (DXA)
