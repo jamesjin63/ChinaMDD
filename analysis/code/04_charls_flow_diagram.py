@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
 """Generate the CHARLS sample flow diagram and data-quality summaries.
 
-Inputs: data/processed/charls_panel_2011_2023.csv and
-analysis/code/qc/panel_build_log.csv.
-Outputs under output/CHARLS/: PDF and PNG flow diagrams, sample counts,
+Inputs: the configured processed CHARLS panel and panel-build sample counts.
+Outputs under results/CHARLS/: PDF and PNG flow diagrams, sample counts,
 wave-specific data quality and panel participation tables."""
 
 from pathlib import Path
@@ -16,12 +15,12 @@ import numpy as np
 import pandas as pd
 from matplotlib.patches import FancyBboxPatch
 
-HERE = Path(__file__).resolve().parent
-REPO_ROOT = HERE.parent.parent
-OUT = REPO_ROOT / "output" / "CHARLS"
-OUT.mkdir(exist_ok=True)
-PANEL = REPO_ROOT / "data" / "processed" / "charls_panel_2011_2023.csv"
-LOG = pd.read_csv(HERE / "qc" / "panel_build_log.csv")
+from settings import OUTPUT_DIR, PROCESSED_DIR, PANEL, require_files
+
+OUT = OUTPUT_DIR / "CHARLS"
+require_files([PANEL, PROCESSED_DIR / "panel_build_log.csv"])
+OUT.mkdir(parents=True, exist_ok=True)
+LOG = pd.read_csv(PROCESSED_DIR / "panel_build_log.csv")
 
 WAVES = [2011, 2013, 2015, 2018, 2020, 2026]
 WLAB = {2011: "2011", 2013: "2013", 2015: "2015", 2018: "2018", 2020: "2020", 2026: "2021–2023"}
@@ -65,7 +64,7 @@ PART["share_pct"] = (100 * PART.persons / PART.persons.sum()).round(1)
 pairs = A[A.d4_persistent.notna()].groupby("wave").size().rename("person_waves_with_previous_wave").reset_index()
 pairs["wave"] = pairs.wave.map(WLAB)
 PART.to_csv(OUT / "09_panel_participation.csv", index=False, encoding="utf-8-sig")
-pairs.to_csv(OUT / "09_panel_participation.csv", index=False, mode="a", encoding="utf-8-sig")
+pairs.to_csv(OUT / "09_persistence_pairs.csv", index=False, encoding="utf-8-sig")
 
 
 DQ = []
@@ -124,7 +123,7 @@ ax.text(LX + 1.2, y, "CHARLS wave", ha="left", va="center", fontsize=7.3, fontwe
 for x, w in zip(XCOL, WAVES):
     ax.text(x, y, WLAB[w], ha="center", va="center", fontsize=7.6, fontweight="bold")
 for dy, lab, vals in [(3.0, "CES-D-10 items", [CESD_VARS[w] for w in WAVES]),
-                      (5.9, "Age at interview from", ["birth year", "birth year", "birth year\n(ID card)", "birth year\n(ID card)", "xrage", "xrage"]),
+                      (5.9, "Age at interview from", ["birth year", "birth year", "birth year\n(ID card)", "birth year\n(ID card)", "birth year\n(person mode)", "birth year\n(person mode)"]),
                       (8.9, "Weight file", ["weight.dta", "Weights.dta", "Weights.dta", "Weights.dta", "Weights.dta", "2023/Weights.dta"])]:
     ax.text(LX + 1.2, y - dy, lab, ha="left", va="center", fontsize=6.2, color=DARK)
     for x, v in zip(XCOL, vals):

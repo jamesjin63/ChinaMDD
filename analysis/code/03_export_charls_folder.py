@@ -3,21 +3,22 @@
 
 The export includes the full panel, the analytic sample aged 50 or older,
 weighted summaries by wave, sex and age, a codebook, a variable crosswalk
-and a copy of the panel-building script."""
+and sample counts."""
 
-import shutil
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
 
-HERE = Path(__file__).resolve().parent
-REPO_ROOT = HERE.parent.parent
-OUT = REPO_ROOT / "output" / "CHARLS"
-(OUT / "code").mkdir(parents=True, exist_ok=True)
-PROC = REPO_ROOT / "data" / "processed"
+from settings import OUTPUT_DIR, PROCESSED_DIR, PANEL, require_files
 
-P = pd.read_csv(PROC / "charls_panel_2011_2023.csv", low_memory=False)
+HERE = Path(__file__).resolve().parent
+OUT = OUTPUT_DIR / "CHARLS"
+OUT.mkdir(parents=True, exist_ok=True)
+PROC = PROCESSED_DIR
+require_files([PANEL, PROC / "charls_variable_crosswalk.csv"])
+
+P = pd.read_csv(PANEL, low_memory=False)
 WLAB = {2011: "2011", 2013: "2013", 2015: "2015", 2018: "2018", 2020: "2020", 2026: "2021–2023"}
 AGES = ["50–54", "55–59", "60–64", "65–69", "70–74", "75–79", "80–84", "85+"]
 
@@ -113,14 +114,10 @@ CB = [
     ("D2_cesd10_ge12", "File 02: CES-D-10 ≥12"),
     ("D3_cesd10_ge15", "File 02: CES-D-10 ≥15"),
     ("D5_ge10_with_ADL", "File 02: CES-D-10 ≥10 and adl_any = 1"),
-    ("D7_ge10_without_dx", "File 02: CES-D-10 ≥10 and dx_emot = 0"),
+    ("D7_ge10_without_dx", "File 02: CES-D-10 ≥10 and dx_emot_ever = 0"),
     ("nonsomatic6_ge6", "File 02: six non-somatic items ≥6 (proportional threshold)"),
 ]
 pd.DataFrame(CB, columns=["column", "definition"]).to_csv(OUT / "05_codebook.csv", index=False, encoding="utf-8-sig")
-shutil.copy(PROC / "charls_variable_crosswalk.csv", OUT / "06_variable_crosswalk_by_wave.csv")
-shutil.copy(HERE / "00_build_charls_panel.py", OUT / "code" / "00_build_charls_panel.py")
-shutil.copy(HERE / "03_export_charls_folder.py", OUT / "code" / "03_export_charls_folder.py")
-shutil.copy(HERE / "04_charls_flow_diagram.py", OUT / "code" / "04_charls_flow_diagram.py")
 
 
 n_wave = P1.groupby("wave_label").size()
@@ -130,7 +127,7 @@ s3b = s3[s3.sex == "Both sexes"][["wave", "n_unweighted", "D1_cesd10_ge10_pct", 
                                   "D5_ge10_with_ADL_pct", "D6_self_reported_dx_pct", "cesd10_mean"]].round(2)
 md = f"""# CHARLS 2011–2023 mental-health (depression) data
 
-> Exported by `code/03_export_charls_folder.py` from the processed panel; raw `.dta` files are in `data/raw/CHARLS/`, the cleaning script is `code/00_build_charls_panel.py`.
+> Exported from the processed panel by `analysis/code/03_export_charls_folder.py`; raw `.dta` files are under the configured input directory, the cleaning script is `analysis/code/00_build_charls_panel.py` in the repository.
 
 ## Files
 
@@ -145,8 +142,8 @@ md = f"""# CHARLS 2011–2023 mental-health (depression) data
 | `07_CHARLS_data_flow.pdf` / `.png` | Sample-derivation flow diagram by wave (respondents → answered CES-D → all ten items → aged ≥50 → weighted), with exclusions at each step | — |
 | `07_CHARLS_data_flow_counts.csv` | All numbers shown in the flow diagram | 6 |
 | `08_data_quality_by_wave.csv` | Data quality by wave: duplicate IDs, missing age/sex/weight, CES-D missingness patterns, score ranges, variable missingness, weight variation | 6 |
-| `09_panel_participation.csv` | Number of waves per person; person-waves for which D4 is defined | — |
-| `code/` | Cleaning, export and flow-diagram scripts (`00_build_charls_panel.py`, `03_export_charls_folder.py`, `04_charls_flow_diagram.py`) | — |
+| `09_panel_participation.csv` | Number of analytic waves per person | — |
+| `09_persistence_pairs.csv` | Person-waves with D4 defined, by wave | — |
 
 ## Sample size
 
@@ -186,8 +183,7 @@ CES-D-10 items are aligned across waves by **content**: 2011–2018 `dc009–dc0
 ## Regenerate
 
 ```bash
-cd analysis/code
-python3 00_build_charls_panel.py && python3 03_export_charls_folder.py && python3 04_charls_flow_diagram.py
+python3 run.py --with-charls-export
 ```
 """
 (OUT / "README.md").write_text(md, encoding="utf-8")

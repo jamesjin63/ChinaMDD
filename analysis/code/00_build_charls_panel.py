@@ -3,26 +3,24 @@
 
 Input: data/raw/CHARLS/CHARLS*/raw_dta/*.dta.
 Outputs: data/processed/charls_panel_2011_2023.csv, variable crosswalk,
-panel documentation and sample counts in analysis/code/qc/.
+panel documentation and sample counts in the processed output folder.
 
 CES-D items are matched by content across waves and recoded from 1–4 to
 0–3. Hopeful and happy are reverse-scored. The complete score requires
 ten items; the prorated sensitivity score permits up to two missing items."""
 
-import warnings
 from pathlib import Path
 
-warnings.filterwarnings("ignore")
 import numpy as np
 import pandas as pd
 import pyreadstat
 
-HERE = Path(__file__).resolve().parent
-OUT = HERE.parent.parent / "data" / "processed"
+from settings import DATA_DIR, PROCESSED_DIR, require_files, charls_files, validate_panel
+
+require_files(charls_files(DATA_DIR / "CHARLS"))
+OUT = PROCESSED_DIR
 OUT.mkdir(parents=True, exist_ok=True)
-QC = HERE / "qc"
-QC.mkdir(exist_ok=True)
-RAW = HERE.parent.parent / "data" / "raw" / "CHARLS"
+RAW = DATA_DIR / "CHARLS"
 
 
 CESD_ITEMS = ["bothered", "mind", "depressed", "effort", "hopeful", "fearful", "sleep", "happy", "lonely", "getgoing"]
@@ -91,6 +89,9 @@ def rd(path, cols=None):
             df[c] = df[c].astype(str).str.strip()
         else:
             df[c] = pd.to_numeric(df[c], errors="coerce")
+    key = "ID" if "ID" in df else "communityID"
+    if df[key].isna().any() or df[key].isin(["", "nan"]).any() or df.duplicated(key).any():
+        raise ValueError(f"Missing or duplicate {key} values in {path}")
     return df
 
 
@@ -231,10 +232,10 @@ def build_follow(w, folder, demo_file, hs_file, cog_file, wt_file, si_file):
     if cog_file is not None:
         cog = rd(d / cog_file, ["ID"] + CESD_VARS[w])
         df = df.merge(cog, on="ID", how="left")
-    wt = rd(d / wt_file, ["ID", WEIGHT_VAR[w], "iyear", "imonth", "crosssection"]).drop_duplicates("ID")
+    wt = rd(d / wt_file, ["ID", WEIGHT_VAR[w], "iyear", "imonth", "crosssection"])
     df = df.merge(wt, on="ID", how="left")
     if si_file is not None:
-        si = rd(d / si_file, ["ID", "iyear", "imonth", "crosssection", "died"]).drop_duplicates("ID")
+        si = rd(d / si_file, ["ID", "iyear", "imonth", "crosssection", "died"])
         df = df.merge(si, on="ID", how="left", suffixes=("", "_si"))
         for c in ("iyear", "imonth", "crosssection", "died"):
             if c + "_si" in df:
@@ -361,8 +362,9 @@ for w in (2011, 2013, 2015, 2018, 2020, 2026):
     m = panel.wave == w
     log(w, "persons aged ≥50 with CES-D-10, weight and sex", int((m & panel.cesd10.notna() & (panel.age >= 50) & panel.weight.notna() & panel.sex.notna()).sum()))
 
+validate_panel(panel)
 panel.to_csv(OUT / "charls_panel_2011_2023.csv", index=False)
-pd.DataFrame(LOG).to_csv(QC / "panel_build_log.csv", index=False)
+pd.DataFrame(LOG).to_csv(OUT / "panel_build_log.csv", index=False)
 print(f"\nPanel: {len(panel):,} person-waves, {panel.ID.nunique():,} persons -> {OUT / 'charls_panel_2011_2023.csv'}")
 
 
